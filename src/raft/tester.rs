@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
@@ -18,12 +21,11 @@ pub struct RaftTester {
     handle: Handle,
     n: usize,
     addrs: Vec<SocketAddr>,
-    rafts: Vec<Option<RaftHandle>>,
-    connected: Vec<bool>,
+    rafts: Mutex<Vec<Option<RaftHandle>>>,
+    connected: Vec<AtomicBool>,
     storage: StorageHandle,
     // stat
     t0: Instant,
-    rpc0: u64,
 }
 
 pub const SNAPSHOT_INTERVAL: u64 = 10;
@@ -39,19 +41,17 @@ impl RaftTester {
 
     async fn new_ext(n: usize, snapshot: bool) -> Self {
         let handle = Handle::current();
-        let mut tester = RaftTester {
+        let tester = RaftTester {
             n,
             addrs: (0..n)
                 .map(|i| SocketAddr::from(([0, 0, 1, i as _], 0)))
                 .collect::<Vec<_>>(),
-            rafts: vec![None; n],
-            connected: vec![false; n],
+            rafts: Mutex::new(vec![None; n]),
+            connected: (0..n).map(|_| AtomicBool::new(false)).collect(),
             storage: StorageHandle::new(n),
             t0: Instant::now(),
-            rpc0: 0,
             handle,
         };
-        tester.rpc0 = tester.rpc_total();
         for i in 0..n {
             tester.start1_ext(i, snapshot).await;
             tester.connect(i);
@@ -69,10 +69,11 @@ impl RaftTester {
             time::sleep(Duration::from_millis(random.gen_range(450..550))).await;
 
             for (i, connected) in self.connected.iter().enumerate() {
-                if !connected {
+                if !connected.load(Ordering::SeqCst) {
                     continue;
                 }
-                let raft = &self.rafts[i].as_ref().unwrap();
+                let rafts = self.rafts.lock().unwrap();
+                let raft = &rafts[i].as_ref().unwrap();
                 if raft.is_leader() {
                     leaders.entry(raft.term()).or_default().push(i);
                 }
@@ -94,10 +95,10 @@ impl RaftTester {
     pub fn check_terms(&self) -> u64 {
         let mut term = 0;
         for (i, connected) in self.connected.iter().enumerate() {
-            if !connected {
+            if !connected.load(Ordering::SeqCst) {
                 continue;
             }
-            let xterm = self.rafts[i].as_ref().unwrap().term();
+            let xterm = self.rafts.lock().unwrap()[i].as_ref().unwrap().term();
             if term == 0 {
                 term = xterm;
             } else if term != xterm {
@@ -111,10 +112,10 @@ impl RaftTester {
     pub fn check_no_leader(&self) {
         debug!("check_no_leader");
         for (i, connected) in self.connected.iter().enumerate() {
-            if !connected {
+            if !connected.load(Ordering::SeqCst) {
                 continue;
             }
-            if self.rafts[i].as_ref().unwrap().is_leader() {
+            if self.rafts.lock().unwrap()[i].as_ref().unwrap().is_leader() {
                 panic!("expected no leader, but {} claims to be leader", i);
             }
         }
@@ -136,11 +137,11 @@ impl RaftTester {
     }
 
     pub fn is_started(&self, i: usize) -> bool {
-        self.rafts[i].is_some()
+        self.rafts.lock().unwrap()[i].is_some()
     }
 
     pub fn term(&self, i: usize) -> u64 {
-        self.rafts[i].as_ref().unwrap().term()
+        self.rafts.lock().unwrap()[i].as_ref().unwrap().term()
     }
 
     pub fn rpc_total(&self) -> u64 {
@@ -162,7 +163,7 @@ impl RaftTester {
     }
 
     pub async fn start(&self, i: usize, cmd: Entry) -> Result<Start> {
-        let raft = self.rafts[i].as_ref().unwrap().clone();
+        let raft = self.rafts.lock().unwrap()[i].as_ref().unwrap().clone();
         self.handle
             .local_handle(self.addrs[i])
             .spawn(async move { raft.start(&bincode::serialize(&cmd).unwrap()).await })
@@ -183,7 +184,7 @@ impl RaftTester {
                 to *= 2;
             }
             if let Some(start_term) = start_term {
-                for rf in self.rafts.iter().filter_map(|x| x.as_ref()) {
+                for rf in self.rafts.lock().unwrap().iter().filter_map(|x| x.as_ref()) {
                     if rf.term() > start_term {
                         // someone has moved on
                         // can no longer guarantee that we'll "win"
@@ -221,7 +222,7 @@ impl RaftTester {
             let mut index = None;
             for _ in 0..self.n {
                 starts = (starts + 1) % self.n;
-                if !self.connected[starts] || !self.is_started(starts) {
+                if !self.connected[starts].load(Ordering::SeqCst) || !self.is_started(starts) {
                     continue;
                 }
                 match self.start(starts, cmd.clone()).await {
@@ -261,41 +262,41 @@ impl RaftTester {
     }
 
     /// detach server i from the net.
-    pub fn disconnect(&mut self, i: usize) {
+    pub fn disconnect(&self, i: usize) {
         debug!("disconnect({})", i);
-        self.connected[i] = false;
+        self.connected[i].store(false, Ordering::SeqCst);
         self.handle.net.disconnect(self.addrs[i]);
     }
 
     /// attach server i to the net.
-    pub fn connect(&mut self, i: usize) {
+    pub fn connect(&self, i: usize) {
         debug!("connect({})", i);
-        self.connected[i] = true;
+        self.connected[i].store(true, Ordering::SeqCst);
         self.handle.net.connect(self.addrs[i]);
     }
 
     /// Is server i connected?
     pub fn is_connected(&self, i: usize) -> bool {
-        self.connected[i]
+        self.connected[i].load(Ordering::SeqCst)
     }
 
     /// Start or re-start a Raft.
-    pub async fn start1(&mut self, i: usize) {
+    pub async fn start1(&self, i: usize) {
         self.start1_ext(i, false).await;
     }
 
     /// Start or re-start a Raft with snapshot.
-    pub async fn start1_snapshot(&mut self, i: usize) {
+    pub async fn start1_snapshot(&self, i: usize) {
         self.start1_ext(i, true).await;
     }
 
-    async fn start1_ext(&mut self, i: usize, snapshot: bool) {
+    async fn start1_ext(&self, i: usize, snapshot: bool) {
         self.crash1(i);
 
         let addrs = self.addrs.clone();
         let handle = self.handle.local_handle(self.addrs[i]);
         let (raft, mut apply_recver) = handle.spawn(RaftHandle::new(addrs, i)).await;
-        self.rafts[i] = Some(raft.clone());
+        self.rafts.lock().unwrap()[i] = Some(raft.clone());
 
         // listen to messages from Raft indicating newly committed messages.
         let storage = self.storage.clone();
@@ -325,10 +326,10 @@ impl RaftTester {
         task.detach();
     }
 
-    pub fn crash1(&mut self, i: usize) {
+    pub fn crash1(&self, i: usize) {
         debug!("crash({})", i);
         self.handle.kill(self.addrs[i]);
-        self.rafts[i] = None;
+        self.rafts.lock().unwrap()[i] = None;
     }
 
     /// End a test.
@@ -341,7 +342,7 @@ impl RaftTester {
         // real time
         let t = self.t0.elapsed();
         // number of RPC sends
-        let nrpc = self.rpc_total() - self.rpc0;
+        let nrpc = self.rpc_total();
         // number of Raft agreements reported
         let ncmds = self.storage.max_index();
 

@@ -3,7 +3,7 @@ use futures::future;
 use log::*;
 use madsim::{
     rand::{self, Rng},
-    time,
+    task, time,
 };
 use std::{
     sync::{
@@ -48,7 +48,7 @@ async fn initial_election_2a() {
 #[madsim::test]
 async fn reelection_2a() {
     let servers = 3;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
     info!("Test (2A): election after network failure");
 
     let leader1 = t.check_one_leader().await;
@@ -81,7 +81,7 @@ async fn reelection_2a() {
 async fn many_election_2a() {
     let servers = 7;
     let iters = 10;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2A): multiple elections");
 
@@ -132,7 +132,7 @@ async fn basic_agree_2b() {
 #[madsim::test]
 async fn fail_agree_2b() {
     let servers = 3;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2B): agreement despite follower disconnection");
 
@@ -163,7 +163,7 @@ async fn fail_agree_2b() {
 #[madsim::test]
 async fn fail_no_agree_2b() {
     let servers = 5;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2B): no agreement if too many followers disconnect");
 
@@ -277,7 +277,7 @@ async fn concurrent_starts_2b() {
 #[madsim::test]
 async fn rejoin_2b() {
     let servers = 3;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2B): rejoin of partitioned leader");
 
@@ -315,7 +315,7 @@ async fn rejoin_2b() {
 #[madsim::test]
 async fn backup_2b() {
     let servers = 5;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2B): leader backs up quickly over incorrect follower logs");
 
@@ -481,7 +481,7 @@ async fn count_2b() {
 #[madsim::test]
 async fn persist1_2c() {
     let servers = 3;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2C): basic persistence");
 
@@ -528,7 +528,7 @@ async fn persist1_2c() {
 #[madsim::test]
 async fn persist2_2c() {
     let servers = 5;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2C): more persistence");
 
@@ -574,7 +574,7 @@ async fn persist2_2c() {
 #[madsim::test]
 async fn persist3_2c() {
     let servers = 3;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2C): partitioned leader and one follower crash, leader restarts");
 
@@ -612,7 +612,7 @@ async fn persist3_2c() {
 #[madsim::test]
 async fn figure_8_2c() {
     let servers = 5;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
 
     info!("Test (2C): Figure 8");
 
@@ -673,7 +673,7 @@ async fn unreliable_agree_2c() {
             let x = (100 * iters) + j;
             let t = t.clone();
             let future = async move { t.one(Entry { x }, 1, true).await };
-            dones.push(madsim::task::spawn_local(future));
+            dones.push(task::spawn_local(future));
         }
         t.one(Entry { x: iters }, 1, true).await;
     }
@@ -688,7 +688,7 @@ async fn unreliable_agree_2c() {
 #[madsim::test]
 async fn figure_8_unreliable_2c() {
     let servers = 5;
-    let mut t = RaftTester::new(servers).await;
+    let t = RaftTester::new(servers).await;
     t.set_unreliable(true);
     info!("Test (2C): Figure 8 (unreliable)");
 
@@ -696,7 +696,7 @@ async fn figure_8_unreliable_2c() {
     t.one(random.gen_entry(), 1, true).await;
 
     let mut nup = servers;
-    for iters in 0..1000 {
+    for _iters in 0..1000 {
         // TODO: long_reordering
         // if iters == 200 {
         //     t.set_long_reordering(true);
@@ -740,12 +740,127 @@ async fn figure_8_unreliable_2c() {
     t.end();
 }
 
+#[madsim::test]
+async fn reliable_churn_2c() {
+    info!("Test (2C): churn");
+    internal_churn(false).await;
+}
+
+#[madsim::test]
+async fn unreliable_churn_2c() {
+    info!("Test (2C): unreliable churn");
+    internal_churn(true).await;
+}
+
+async fn internal_churn(unreliable: bool) {
+    let servers = 5;
+    let t = Arc::new(RaftTester::new(servers).await);
+    t.set_unreliable(unreliable);
+
+    let stop = Arc::new(AtomicBool::new(false));
+
+    // create concurrent clients
+    async fn cfn(servers: usize, me: usize, stop: Arc<AtomicBool>, t: Arc<RaftTester>) -> Vec<u64> {
+        let mut values = vec![];
+        let mut random = rand::rng();
+        while !stop.load(Ordering::SeqCst) {
+            let x = random.gen_entry();
+            let mut index = None;
+            // try them all, maybe one of them is a leader
+            for i in 0..servers {
+                if !t.is_started(i) {
+                    continue;
+                }
+                match t.start(i, x.clone()).await {
+                    Ok(start) => index = Some(start.index),
+                    Err(_) => continue,
+                }
+            }
+            if let Some(index) = index {
+                // maybe leader will commit our value, maybe not.
+                // but don't wait forever.
+                for to in [10, 20, 50, 100, 200] {
+                    let (_, cmd) = t.n_committed(index);
+                    if let Some(cmd) = cmd {
+                        if cmd == x {
+                            values.push(cmd.x);
+                        }
+                        break;
+                    }
+                    time::sleep(Duration::from_millis(to)).await;
+                }
+            } else {
+                time::sleep(Duration::from_millis((79 + me * 17) as u64)).await;
+            }
+        }
+        values
+    }
+
+    let ncli = 3;
+    let mut nrec = vec![];
+    for i in 0..ncli {
+        nrec.push(task::spawn_local(cfn(servers, i, stop.clone(), t.clone())));
+    }
+    let mut random = rand::rng();
+    for _iters in 0..20 {
+        if random.gen_bool(0.2) {
+            let i = random.gen_range(0..servers);
+            t.disconnect(i);
+        }
+        if random.gen_bool(0.5) {
+            let i = random.gen_range(0..servers);
+            if !t.is_started(i) {
+                t.start1(i).await;
+            }
+            t.connect(i);
+        }
+        if random.gen_bool(0.2) {
+            let i = random.gen_range(0..servers);
+            if t.is_started(i) {
+                t.crash1(i);
+            }
+        }
+
+        // Make crash/restart infrequent enough that the peers can often
+        // keep up, but not so infrequent that everything has settled
+        // down from one change to the next. Pick a value smaller than
+        // the election timeout, but not hugely smaller.
+        time::sleep((RAFT_ELECTION_TIMEOUT * 7) / 10).await;
+    }
+
+    time::sleep(RAFT_ELECTION_TIMEOUT).await;
+    t.set_unreliable(false);
+
+    for i in 0..servers {
+        if !t.is_started(i) {
+            t.start1(i).await;
+        }
+        t.connect(i);
+    }
+
+    stop.store(true, Ordering::SeqCst);
+    time::sleep(RAFT_ELECTION_TIMEOUT).await;
+
+    let last_index = t.one(random.gen_entry(), servers, true).await;
+
+    let mut really = vec![];
+    for index in 1..=last_index {
+        let v = t.wait(index, servers, None).await.unwrap();
+        really.push(v.x);
+    }
+    for v1 in future::join_all(nrec).await.iter().flatten() {
+        assert!(really.contains(v1), "didn't find a value");
+    }
+
+    t.end();
+}
+
 async fn snap_common(disconnect: bool, reliable: bool, crash: bool) {
     const MAX_LOG_SIZE: usize = 2000;
 
     let iters = 30;
     let servers = 3;
-    let mut t = RaftTester::new_with_snapshot(servers).await;
+    let t = RaftTester::new_with_snapshot(servers).await;
     t.set_unreliable(!reliable);
 
     let mut random = rand::rng();
