@@ -1,5 +1,5 @@
 use super::{client, server::ShardKv};
-use crate::shard_ctrler::{client::Clerk as CtrlerClerk, server::ShardCtrler};
+use crate::shard_ctrler::{client::Clerk as CtrlerClerk, server::ShardCtrler, N_SHARDS};
 use ::rand::distributions::Alphanumeric;
 use madsim::{
     rand::{self, Rng},
@@ -201,11 +201,8 @@ impl Tester {
     /// QUERY to find shards now owned by group
     pub async fn query_shards_of(&self, group: usize) -> HashSet<usize> {
         let c = self.ctrler_ck.query(None).await;
-        c.shards
-            .iter()
-            .filter(|(_, &gid)| gid == self.groups[group].gid)
-            .map(|(&s, _)| s)
-            .collect()
+        let gid = self.groups[group].gid;
+        (0..N_SHARDS).filter(|&i| c.shards[i] == gid).collect()
     }
 
     /// End a Test -- the fact that we got here means there

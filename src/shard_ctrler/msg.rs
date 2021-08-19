@@ -1,3 +1,4 @@
+use super::N_SHARDS;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr};
 
@@ -11,7 +12,7 @@ pub struct Config {
     /// config number
     pub num: ConfigId,
     /// shard -> gid
-    pub shards: HashMap<usize, Gid>,
+    pub shards: [Gid; N_SHARDS],
     /// gid -> servers[]
     pub groups: HashMap<Gid, Vec<SocketAddr>>,
 }

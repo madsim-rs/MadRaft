@@ -91,7 +91,7 @@ async fn basic_4a() {
         let cf = ck.query().await;
         let shard = if i < N_SHARDS / 2 { gid3 } else { gid4 };
         ck.move_(i, shard).await;
-        if cf.shards[&i] != shard {
+        if cf.shards[i] != shard {
             let cf1 = ck.query().await;
             assert!(cf1.num > cf.num, "Move should increase Tester.Num");
         }
@@ -99,7 +99,7 @@ async fn basic_4a() {
     let cf2 = ck.query().await;
     for i in 0..N_SHARDS {
         let shard = if i < N_SHARDS / 2 { gid3 } else { gid4 };
-        assert_eq!(cf2.shards[&i], shard, "shard {} wrong group", i);
+        assert_eq!(cf2.shards[i], shard, "shard {} wrong group", i);
     }
     ck.leave(&[gid3]).await;
     ck.leave(&[gid4]).await;
@@ -127,17 +127,21 @@ async fn basic_4a() {
     info!("Test: Minimal transfers after joins ...");
 
     let c1 = ck.query().await;
+    debug!("{:#?}", c1);
     for i in 0..5 {
         let gid = npara + 1 + i;
         ck.join(groups!(gid => addrs![gid + 1, gid + 2, gid + 2]))
             .await;
     }
     let c2 = ck.query().await;
+    debug!("{:#?}", c2);
     for i in 1..=npara {
-        for j in 0..c1.shards.len() {
+        for j in 0..N_SHARDS {
             assert!(
-                c2.shards[&j] == i && c1.shards[&j] != i,
-                "non-minimal transfer after Join()s"
+                !(c2.shards[j] == i && c1.shards[j] != i),
+                "non-minimal transfer after Join()s: {:?} -> {:?}",
+                c1.shards,
+                c2.shards
             );
         }
     }
@@ -151,10 +155,12 @@ async fn basic_4a() {
     }
     let c3 = ck.query().await;
     for i in 1..=npara {
-        for j in 0..c1.shards.len() {
+        for j in 0..N_SHARDS {
             assert!(
-                c2.shards[&j] == i && c3.shards[&j] != i,
-                "non-minimal transfer after Leave()s"
+                !(c2.shards[j] == i && c3.shards[j] != i),
+                "non-minimal transfer after Leave()s: {:?} -> {:?}",
+                c2.shards,
+                c3.shards
             );
         }
     }
@@ -246,10 +252,12 @@ async fn multi_4a() {
     ck.join(m).await;
     let c2 = ck.query().await;
     for i in 1..=npara {
-        for j in 0..c1.shards.len() {
+        for j in 0..N_SHARDS {
             assert!(
-                c2.shards[&j] == i && c1.shards[&j] != i,
-                "non-minimal transfer after Join()s"
+                !(c2.shards[j] == i && c1.shards[j] != i),
+                "non-minimal transfer after Join()s: {:?} -> {:?}",
+                c1.shards,
+                c2.shards
             );
         }
     }
@@ -262,10 +270,12 @@ async fn multi_4a() {
     ck.leave(&l).await;
     let c3 = ck.query().await;
     for i in 1..=npara {
-        for j in 0..c1.shards.len() {
+        for j in 0..N_SHARDS {
             assert!(
-                c2.shards[&j] == i && c3.shards[&j] != i,
-                "non-minimal transfer after Leave()s"
+                !(c2.shards[j] == i && c3.shards[j] != i),
+                "non-minimal transfer after Leave()s: {:?} -> {:?}",
+                c2.shards,
+                c3.shards
             );
         }
     }

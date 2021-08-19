@@ -1,6 +1,5 @@
-use crate::kvraft::client::ClerkCore;
+use crate::kvraft::{client::ClerkCore, msg::Op};
 use crate::shard_ctrler::N_SHARDS;
-use madsim::rand::{self, Rng};
 use std::{collections::HashMap, net::SocketAddr};
 
 // which shard is a key in?
@@ -15,7 +14,7 @@ pub fn key2shard(key: &str) -> usize {
 }
 
 pub struct Clerk {
-    core: ClerkCore,
+    core: ClerkCore<Op, String>,
 }
 
 impl Clerk {

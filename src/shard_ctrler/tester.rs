@@ -129,7 +129,6 @@ impl Tester {
         let id = ClerkId(self.next_client_id.fetch_add(1, Ordering::SeqCst));
         self.connect_client(id, to);
         Clerk {
-            id,
             handle: self.handle.local_handle(id.to_addr()),
             ck: Arc::new(client::Clerk::new(self.addrs.clone())),
             ops: self.ops.clone(),
@@ -219,16 +218,11 @@ impl ClerkId {
 
 pub struct Clerk {
     handle: LocalHandle,
-    id: ClerkId,
     ck: Arc<client::Clerk>,
     ops: Arc<AtomicUsize>,
 }
 
 impl Clerk {
-    pub const fn id(&self) -> ClerkId {
-        self.id
-    }
-
     pub async fn query(&self) -> Config {
         self.op();
         let ck = self.ck.clone();
@@ -280,9 +274,9 @@ impl Clerk {
         }
         // any un-allocated shards?
         if groups.is_empty() {
-            for (shard, gid) in c.shards.iter() {
+            for (shard, gid) in c.shards.iter().enumerate() {
                 assert!(
-                    c.groups.contains_key(gid),
+                    *gid == 0 || c.groups.contains_key(gid),
                     "shard {} -> invalid group {}",
                     shard,
                     gid
@@ -291,7 +285,7 @@ impl Clerk {
         }
         // more or less balanced sharding?
         let mut counts = HashMap::<u64, usize>::new();
-        for (_, &gid) in c.shards.iter() {
+        for &gid in c.shards.iter() {
             *counts.entry(gid).or_default() += 1;
         }
         if !c.groups.is_empty() {
@@ -300,9 +294,10 @@ impl Clerk {
             let max = counts.clone().max().unwrap();
             assert!(
                 max <= min + 1,
-                "imbalanced sharding, max {} too much larger than min {}",
+                "imbalanced sharding, max {} too much larger than min {}: {:?}",
                 max,
-                min
+                min,
+                c.shards,
             );
         }
     }

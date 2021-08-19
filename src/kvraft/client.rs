@@ -10,7 +10,7 @@ use std::{
 };
 
 pub struct Clerk {
-    core: ClerkCore,
+    core: ClerkCore<Op, String>,
 }
 
 impl Clerk {
@@ -24,50 +24,47 @@ impl Clerk {
     /// returns "" if the key does not exist.
     /// keeps trying forever in the face of all other errors.
     pub async fn get(&self, key: String) -> String {
-        let id: u64 = rand::rng().gen();
-        let args = Op::Get { key };
-        self.core.call::<_, String>((id, args)).await
+        self.core.call(Op::Get { key }).await
     }
 
     pub async fn put(&self, key: String, value: String) {
-        let id: u64 = rand::rng().gen();
-        let args = Op::Put { key, value };
-        self.core.call::<_, String>((id, args)).await;
+        self.core.call(Op::Put { key, value }).await;
     }
 
     pub async fn append(&self, key: String, value: String) {
-        let id: u64 = rand::rng().gen();
-        let args = Op::Append { key, value };
-        self.core.call::<_, String>((id, args)).await;
+        self.core.call(Op::Append { key, value }).await;
     }
 }
 
-pub struct ClerkCore {
+pub struct ClerkCore<Req, Rsp> {
     servers: Vec<SocketAddr>,
     leader: AtomicUsize,
+    _mark: std::marker::PhantomData<(Req, Rsp)>,
 }
 
-impl ClerkCore {
-    pub fn new(servers: Vec<SocketAddr>) -> ClerkCore {
+impl<Req, Rsp> ClerkCore<Req, Rsp>
+where
+    Req: net::Message + Clone,
+    Rsp: net::Message,
+{
+    pub fn new(servers: Vec<SocketAddr>) -> Self {
         ClerkCore {
             servers,
             leader: AtomicUsize::new(0),
+            _mark: std::marker::PhantomData,
         }
     }
 
-    pub async fn call<Req, Rsp>(&self, args: Req) -> Rsp
-    where
-        Req: net::Message + Clone,
-        Rsp: net::Message,
-    {
+    pub async fn call(&self, args: Req) -> Rsp {
+        let id: u64 = rand::rng().gen();
         let net = net::NetLocalHandle::current();
         let mut i = self.leader.load(Ordering::Relaxed);
         loop {
             debug!("->{} {:?}", i, args);
             match net
-                .call_timeout::<Req, Result<Rsp, Error>>(
+                .call_timeout::<(u64, Req), Result<Rsp, Error>>(
                     self.servers[i],
-                    args.clone(),
+                    (id, args.clone()),
                     Duration::from_millis(500),
                 )
                 .await
