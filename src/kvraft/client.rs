@@ -60,7 +60,7 @@ impl ClerkCore {
         Req: net::Message + Clone,
         Rsp: net::Message,
     {
-        let net = net::NetworkLocalHandle::current();
+        let net = net::NetLocalHandle::current();
         let mut i = self.leader.load(Ordering::Relaxed);
         loop {
             debug!("->{} {:?}", i, args);

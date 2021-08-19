@@ -93,7 +93,7 @@ impl<S: State> Server<S> {
     }
 
     fn start_rpc_server(self: &Arc<Self>) {
-        let net = net::NetworkLocalHandle::current();
+        let net = net::NetLocalHandle::current();
 
         let this = self.clone();
         net.add_rpc_handler(move |(id, cmd): (u64, S::Command)| {

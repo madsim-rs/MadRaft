@@ -1,7 +1,7 @@
 use super::tester::Tester;
 use futures::{future, select, FutureExt};
 use madsim::{
-    rand::{self, seq::SliceRandom, Rng},
+    rand::{self, Rng, SliceRandom},
     task,
     time::{self, Duration},
 };

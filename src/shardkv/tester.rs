@@ -1,7 +1,8 @@
 use super::{client, server::ShardKv};
 use crate::shard_ctrler::{client::Clerk as CtrlerClerk, server::ShardCtrler};
+use ::rand::distributions::Alphanumeric;
 use madsim::{
-    rand::{self, distributions::Alphanumeric, Rng},
+    rand::{self, Rng},
     time::*,
     Handle, LocalHandle,
 };
@@ -135,7 +136,6 @@ impl Tester {
     pub fn make_client(&self) -> Clerk {
         let id = ClerkId(self.next_client_id.fetch_add(1, Ordering::SeqCst));
         Clerk {
-            id,
             handle: self.handle.local_handle(id.to_addr()),
             ck: Arc::new(client::Clerk::new(self.ctrler_addrs.clone())),
         }
@@ -203,7 +203,7 @@ impl Tester {
         let c = self.ctrler_ck.query(None).await;
         c.shards
             .iter()
-            .filter(|(s, &gid)| gid == self.groups[1].gid)
+            .filter(|(_, &gid)| gid == self.groups[group].gid)
             .map(|(&s, _)| s)
             .collect()
     }
@@ -245,15 +245,10 @@ impl ClerkId {
 
 pub struct Clerk {
     handle: LocalHandle,
-    id: ClerkId,
     ck: Arc<client::Clerk>,
 }
 
 impl Clerk {
-    pub const fn id(&self) -> ClerkId {
-        self.id
-    }
-
     pub async fn put_kvs(&self, kvs: &[(String, String)]) {
         let ck = self.ck.clone();
         let kvs = Vec::from(kvs);

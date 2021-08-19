@@ -2,7 +2,7 @@ use self::{logs::Logs, msg::*};
 use futures::{channel::mpsc, join, select, stream::FuturesUnordered, FutureExt, StreamExt};
 use madsim::{
     fs::{self, File},
-    net::NetworkLocalHandle,
+    net,
     rand::{self, Rng},
     task::Task,
     time::{self, *},
@@ -282,7 +282,7 @@ impl RaftHandle {
     }
 
     fn start_rpc_server(&self) {
-        let net = NetworkLocalHandle::current();
+        let net = net::NetLocalHandle::current();
 
         let this = self.clone();
         net.add_rpc_handler(move |args: RequestVoteArgs| {
@@ -454,7 +454,7 @@ impl Raft {
             last_log_term: self.log.last().unwrap().term,
         };
         debug!("{:?} -> {:?}", self, args);
-        let net = NetworkLocalHandle::current();
+        let net = net::NetLocalHandle::current();
         let mut rpcs = self
             .peers
             .iter()
@@ -524,7 +524,7 @@ impl Raft {
             let leader_id = self.me as u64;
             self.tasks_of_state.push(madsim::task::spawn(async move {
                 let mut backoff = 1;
-                let net = NetworkLocalHandle::current();
+                let net = net::NetLocalHandle::current();
                 loop {
                     enum Task {
                         AppendEntries(AppendEntriesArgs),
