@@ -1,18 +1,15 @@
-use super::{client, server::ShardKv};
+use super::{client::Clerk, server::ShardKv};
 use crate::shard_ctrler::{client::Clerk as CtrlerClerk, server::ShardCtrler, N_SHARDS};
 use ::rand::distributions::Alphanumeric;
 use madsim::{
     rand::{self, Rng},
     time::*,
-    Handle, LocalHandle,
+    Handle,
 };
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 
 pub struct Tester {
@@ -25,7 +22,6 @@ pub struct Tester {
 
     groups: Vec<Group>,
 
-    next_client_id: AtomicUsize,
     max_raft_state: Option<u64>,
 
     // begin()/end() statistics
@@ -67,7 +63,7 @@ impl Tester {
             .map(|i| Group {
                 gid: i as u64 + 100,
                 addrs: (0..n)
-                    .map(|i| SocketAddr::from(([0, 0, 2, i as _], 0)))
+                    .map(|j| SocketAddr::from(([0, 1, i as _, j as _], 0)))
                     .collect(),
                 servers: Mutex::new(vec![None; n]),
             })
@@ -80,7 +76,6 @@ impl Tester {
             ctrlers,
             ctrler_ck,
             groups,
-            next_client_id: AtomicUsize::new(0),
             max_raft_state,
             t0: Instant::now(),
         };
@@ -96,8 +91,8 @@ impl Tester {
     pub fn check_logs(&self) {
         for group in self.groups.iter() {
             for &addr in group.addrs.iter() {
-                let state_size = self.handle.fs.get_file_size(addr, "state").unwrap();
-                let snap_size = self.handle.fs.get_file_size(addr, "snapshot").unwrap();
+                let state_size = self.handle.fs.get_file_size(addr, "state").unwrap_or(0);
+                let snap_size = self.handle.fs.get_file_size(addr, "snapshot").unwrap_or(0);
                 if let Some(limit) = self.max_raft_state {
                     assert!(
                         state_size <= 8 * limit,
@@ -134,11 +129,7 @@ impl Tester {
     // Create a clerk with clerk specific server names.
     // Give it connections to all of the servers
     pub fn make_client(&self) -> Clerk {
-        let id = ClerkId(self.next_client_id.fetch_add(1, Ordering::SeqCst));
-        Clerk {
-            handle: self.handle.local_handle(id.to_addr()),
-            ck: Arc::new(client::Clerk::new(self.ctrler_addrs.clone())),
-        }
+        Clerk::new(self.ctrler_addrs.clone())
     }
 
     /// Start i'th server of group.
@@ -231,90 +222,33 @@ impl Tester {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ClerkId(usize);
-
-impl ClerkId {
-    fn to_addr(&self) -> SocketAddr {
-        SocketAddr::from(([0, 0, 3, self.0 as u8], 1))
-    }
-}
-
-pub struct Clerk {
-    handle: LocalHandle,
-    ck: Arc<client::Clerk>,
-}
-
 impl Clerk {
     pub async fn put_kvs(&self, kvs: &[(String, String)]) {
-        let ck = self.ck.clone();
-        let kvs = Vec::from(kvs);
-        self.handle
-            .spawn(async move {
-                for (k, v) in kvs {
-                    ck.put(k, v).await;
-                }
-            })
-            .await
+        for (k, v) in kvs {
+            self.put(k.clone(), v.clone()).await;
+        }
     }
 
     pub async fn check(&self, k: String, v: String) {
-        let ck = self.ck.clone();
-        self.handle
-            .spawn(async move {
-                let v0 = ck.get(k.clone()).await;
-                assert_eq!(v0, v, "check failed: key={:?}", k);
-            })
-            .await
-    }
-
-    pub async fn put(&self, k: String, v: String) {
-        let ck = self.ck.clone();
-        self.handle
-            .spawn(async move {
-                ck.put(k, v).await;
-            })
-            .await
-    }
-
-    pub async fn append(&self, k: String, v: String) {
-        let ck = self.ck.clone();
-        self.handle
-            .spawn(async move {
-                ck.append(k, v).await;
-            })
-            .await
+        let v0 = self.get(k.clone()).await;
+        assert_eq!(v0, v, "check failed: key={:?}", k);
     }
 
     pub async fn check_kvs(&self, kvs: &[(String, String)]) {
-        let ck = self.ck.clone();
-        let kvs = Vec::from(kvs);
-        self.handle
-            .spawn(async move {
-                for (k, v) in kvs {
-                    let v0 = ck.get(k.clone()).await;
-                    assert_eq!(v0, v, "check failed: key={:?}", k);
-                }
-            })
-            .await
+        for (k, v) in kvs {
+            let v0 = self.get(k.clone()).await;
+            assert_eq!(&v0, v, "check failed: key={:?}", k);
+        }
     }
 
     pub async fn check_append_kvs(&self, kvs: &mut Vec<(String, String)>, len: usize) {
-        let ck = self.ck.clone();
-        let mut kvs0 = std::mem::take(kvs);
-        *kvs = self
-            .handle
-            .spawn(async move {
-                for (k, v) in kvs0.iter_mut() {
-                    let v0 = ck.get(k.clone()).await;
-                    assert_eq!(&v0, v, "check failed: key={:?}", k);
-                    let s = rand_string(len);
-                    *v += &s;
-                    ck.append(k.clone(), s).await;
-                }
-                kvs0
-            })
-            .await;
+        for (k, v) in kvs.iter_mut() {
+            let v0 = self.get(k.clone()).await;
+            assert_eq!(&v0, v, "check failed: key={:?}", k);
+            let s = rand_string(len);
+            *v += &s;
+            self.append(k.clone(), s).await;
+        }
     }
 }
 

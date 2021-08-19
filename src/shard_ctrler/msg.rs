@@ -35,13 +35,3 @@ pub enum Op {
         gid: Gid,
     },
 }
-
-#[derive(thiserror::Error, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Error {
-    #[error("not leader")]
-    NotLeader(usize),
-    #[error("timeout")]
-    Timeout,
-    #[error("failed to reach consensus")]
-    Failed,
-}
