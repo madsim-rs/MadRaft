@@ -541,7 +541,7 @@ async fn challenge2_unaffected_4b() {
 
     // And finally: check that gets/puts for 101-owned keys still complete
     for (k, v) in kvs.iter() {
-        let shard = super::client::key2shard(k);
+        let shard = super::key2shard(k);
         if owned.contains(&shard) {
             ck.check(k.clone(), v.clone()).await;
             ck.put(k.clone(), v.clone() + "-1").await;
@@ -592,7 +592,7 @@ async fn challenge2_partial_4b() {
 
     // And finally: check that gets/puts for 101-owned keys now complete
     for (k, v) in kvs.iter() {
-        let shard = super::client::key2shard(k);
+        let shard = super::key2shard(k);
         if owned.contains(&shard) {
             ck.check(k.clone(), v.clone()).await;
             ck.put(k.clone(), v.clone() + "-2").await;

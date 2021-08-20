@@ -1,4 +1,4 @@
-use super::{client::Clerk, server::ShardKv};
+use super::{client::Clerk, server::ShardKvServer};
 use crate::shard_ctrler::{client::Clerk as CtrlerClerk, server::ShardCtrler, N_SHARDS};
 use ::rand::distributions::Alphanumeric;
 use madsim::{
@@ -31,7 +31,7 @@ pub struct Tester {
 struct Group {
     gid: u64,
     addrs: Vec<SocketAddr>,
-    servers: Mutex<Vec<Option<Arc<ShardKv>>>>,
+    servers: Mutex<Vec<Option<Arc<ShardKvServer>>>>,
 }
 
 impl Tester {
@@ -138,7 +138,7 @@ impl Tester {
         let group = &self.groups[group];
         let addrs = group.addrs.clone();
         let handle = self.handle.local_handle(group.addrs[i]);
-        let kv = handle.spawn(ShardKv::new(addrs, i, None)).await;
+        let kv = handle.spawn(ShardKvServer::new(addrs, i, None)).await;
         group.servers.lock().unwrap()[i] = Some(kv);
     }
 

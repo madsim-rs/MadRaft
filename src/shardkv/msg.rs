@@ -17,14 +17,9 @@ impl Op {
     }
 }
 
-#[derive(thiserror::Error, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Error {
-    #[error("not leader")]
-    NotLeader(usize),
-    #[error("wrong group")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Reply {
+    Get { value: String },
+    Ok,
     WrongGroup,
-    #[error("timeout")]
-    Timeout,
-    #[error("failed to reach consensus")]
-    Failed,
 }
