@@ -2,7 +2,6 @@ use super::{tester::*, N_SHARDS};
 use futures::future;
 use log::*;
 use madsim::{
-    rand::{self, Rng},
     task,
     time::{self, Duration},
 };
@@ -29,7 +28,7 @@ macro_rules! groups {
 async fn basic_4a() {
     let nservers = 3;
     let t = Tester::new(nservers, false).await;
-    let ck = t.make_client(&t.all());
+    let ck = t.make_client();
 
     info!("Test: Basic leave/join ...");
 
@@ -74,7 +73,6 @@ async fn basic_4a() {
             assert_eq!(&c, cf);
         }
         t.start_server(s).await;
-        t.connect_all();
     }
 
     info!("  ... Passed");
@@ -112,7 +110,7 @@ async fn basic_4a() {
     let gids: Vec<u64> = (0..npara).map(|i| i as u64 * 10 + 100).collect();
     let mut handles = vec![];
     for &gid in gids.iter() {
-        let cka = t.make_client(&t.all());
+        let cka = t.make_client();
         handles.push(task::spawn_local(async move {
             cka.join(groups!(gid + 1000 => addrs![gid + 1])).await;
             cka.join(groups!(gid => addrs![gid + 2])).await;
@@ -174,7 +172,7 @@ async fn basic_4a() {
 async fn multi_4a() {
     let nservers = 3;
     let t = Tester::new(nservers, false).await;
-    let ck = t.make_client(&t.all());
+    let ck = t.make_client();
 
     info!("Test: Multi-group leave/join ...");
 
@@ -224,7 +222,7 @@ async fn multi_4a() {
     let gids: Vec<u64> = (0..npara).map(|i| i as u64 + 1000).collect();
     let mut handles = vec![];
     for &gid in gids.iter() {
-        let cka = t.make_client(&t.all());
+        let cka = t.make_client();
         handles.push(task::spawn_local(async move {
             cka.join(groups!(
                 gid => addrs![gid + 1, gid + 2, gid + 3],

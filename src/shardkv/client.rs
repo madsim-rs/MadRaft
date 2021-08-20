@@ -79,7 +79,7 @@ impl Clerk {
             }
             sleep(Duration::from_millis(100)).await;
             // ask controler for the latest configuration.
-            let config = self.ctrl_ck.query(None).await;
+            let config = self.ctrl_ck.query().await;
             *self.config.lock().unwrap() = config;
         }
     }

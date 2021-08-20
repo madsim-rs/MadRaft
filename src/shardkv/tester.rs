@@ -18,7 +18,7 @@ pub struct Tester {
 
     ctrler_addrs: Vec<SocketAddr>,
     ctrlers: Vec<Arc<ShardCtrler>>,
-    ctrler_ck: Arc<CtrlerClerk>,
+    ctrler_ck: CtrlerClerk,
 
     groups: Vec<Group>,
 
@@ -56,7 +56,7 @@ impl Tester {
                 .await;
             ctrlers.push(ctrler);
         }
-        let ctrler_ck = Arc::new(CtrlerClerk::new(ctrler_addrs.clone()));
+        let ctrler_ck = CtrlerClerk::new(ctrler_addrs.clone());
 
         let n_groups: usize = 3;
         let groups = (0..n_groups)
@@ -185,13 +185,13 @@ impl Tester {
 
     pub async fn leaves(&self, groups: &[usize]) {
         debug!("leave({:?})", groups);
-        let gids = groups.iter().map(|&g| self.groups[g].gid).collect();
-        self.ctrler_ck.leave(gids).await;
+        let gids: Vec<u64> = groups.iter().map(|&g| self.groups[g].gid).collect();
+        self.ctrler_ck.leave(&gids).await;
     }
 
     /// QUERY to find shards now owned by group
     pub async fn query_shards_of(&self, group: usize) -> HashSet<usize> {
-        let c = self.ctrler_ck.query(None).await;
+        let c = self.ctrler_ck.query().await;
         let gid = self.groups[group].gid;
         (0..N_SHARDS).filter(|&i| c.shards[i] == gid).collect()
     }

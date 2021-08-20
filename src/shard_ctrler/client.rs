@@ -13,16 +13,20 @@ impl Clerk {
         }
     }
 
-    pub async fn query(&self, num: Option<u64>) -> Config {
-        self.core.call(Op::Query { num }).await.unwrap()
+    pub async fn query(&self) -> Config {
+        self.core.call(Op::Query { num: None }).await.unwrap()
+    }
+
+    pub async fn query_at(&self, num: u64) -> Config {
+        self.core.call(Op::Query { num: Some(num) }).await.unwrap()
     }
 
     pub async fn join(&self, groups: HashMap<Gid, Vec<SocketAddr>>) {
         self.core.call(Op::Join { groups }).await;
     }
 
-    pub async fn leave(&self, gids: Vec<u64>) {
-        self.core.call(Op::Leave { gids }).await;
+    pub async fn leave(&self, gids: &[u64]) {
+        self.core.call(Op::Leave { gids: gids.into() }).await;
     }
 
     pub async fn move_(&self, shard: usize, gid: u64) {

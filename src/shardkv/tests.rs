@@ -540,9 +540,9 @@ async fn challenge2_unaffected_4b() {
     time::sleep(Duration::from_secs(1)).await;
 
     // And finally: check that gets/puts for 101-owned keys still complete
-    for (i, (k, v)) in kvs.iter().enumerate() {
+    for (k, v) in kvs.iter() {
         let shard = super::client::key2shard(k);
-        if owned.contains(&i) {
+        if owned.contains(&shard) {
             ck.check(k.clone(), v.clone()).await;
             ck.put(k.clone(), v.clone() + "-1").await;
             ck.check(k.clone(), v.clone() + "-1").await;
@@ -570,7 +570,7 @@ async fn challenge2_partial_4b() {
 
     // Do a bunch of puts to keys in all shards
     let n = 10;
-    let mut kvs = (0..n)
+    let kvs = (0..n)
         .map(|i| (i.to_string(), "100".into()))
         .collect::<Vec<_>>();
     ck.put_kvs(&kvs).await;
@@ -591,9 +591,9 @@ async fn challenge2_partial_4b() {
     time::sleep(Duration::from_secs(1)).await;
 
     // And finally: check that gets/puts for 101-owned keys now complete
-    for (i, (k, v)) in kvs.iter().enumerate() {
+    for (k, v) in kvs.iter() {
         let shard = super::client::key2shard(k);
-        if owned.contains(&i) {
+        if owned.contains(&shard) {
             ck.check(k.clone(), v.clone()).await;
             ck.put(k.clone(), v.clone() + "-2").await;
             ck.check(k.clone(), v.clone() + "-2").await;
