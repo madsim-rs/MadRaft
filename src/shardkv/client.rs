@@ -1,7 +1,10 @@
 use super::{key2shard, msg::*};
 use crate::kvraft::client::ClerkCore;
 use crate::shard_ctrler::{client::Clerk as CtrlerClerk, msg::Config};
-use madsim::time::*;
+use madsim::{
+    rand::{self, Rng},
+    time::*,
+};
 use std::{net::SocketAddr, sync::Mutex};
 
 pub struct Clerk {
@@ -25,11 +28,13 @@ impl Clerk {
     }
 
     pub async fn put(&self, key: String, value: String) {
-        self.call(Op::Put { key, value }).await;
+        let id: u64 = rand::rng().gen();
+        self.call(Op::Put { id, key, value }).await;
     }
 
     pub async fn append(&self, key: String, value: String) {
-        self.call(Op::Append { key, value }).await;
+        let id: u64 = rand::rng().gen();
+        self.call(Op::Append { id, key, value }).await;
     }
 
     async fn call(&self, args: Op) -> Reply {

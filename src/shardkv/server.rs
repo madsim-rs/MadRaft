@@ -61,44 +61,47 @@ pub struct ShardKv {
     next_cfg: Option<Config>,
     /// Shards.
     shards: HashMap<usize, Shard>,
-    /// Recent command IDs. To prevent duplicate.
-    ids: VecDeque<u64>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Shard {
     kv: HashMap<String, String>,
+    /// Recent command IDs. To prevent duplicate.
+    ids: VecDeque<u32>,
+}
+
+impl Shard {
+    fn test_dup_id(&mut self, id: u64) -> bool {
+        let unique = !self.ids.contains(&(id as u32));
+        if self.ids.len() >= 10 {
+            self.ids.pop_front();
+        }
+        self.ids.push_back(id as u32);
+        unique
+    }
 }
 
 impl State for ShardKv {
     type Command = Op;
     type Output = Reply;
 
-    fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output {
-        let unique = !self.ids.contains(&id);
-        if self.ids.len() > 50 {
-            self.ids.pop_front();
-        }
-        self.ids.push_back(id);
-
+    fn apply(&mut self, _id: u64, cmd: Self::Command) -> Self::Output {
         match cmd {
-            Op::Put { key, value } => {
+            Op::Put { id, key, value } => {
                 if let Some(shard) = self.try_serve(&key) {
-                    if unique {
+                    if shard.test_dup_id(id) {
                         shard.kv.insert(key, value);
                     }
                 } else {
-                    // TODO: return Moving?
                     return Reply::WrongGroup;
                 }
             }
-            Op::Append { key, value } => {
+            Op::Append { id, key, value } => {
                 if let Some(shard) = self.try_serve(&key) {
-                    if unique {
+                    if shard.test_dup_id(id) {
                         shard.kv.entry(key).or_default().push_str(&value);
                     }
                 } else {
-                    // TODO: return Moving?
                     return Reply::WrongGroup;
                 }
             }
@@ -108,7 +111,6 @@ impl State for ShardKv {
                         value: shard.kv.get(&key).cloned(),
                     };
                 } else {
-                    // TODO: return Moving?
                     return Reply::WrongGroup;
                 }
             }
@@ -135,6 +137,7 @@ impl State for ShardKv {
                         cfg_num: self.cfg.num,
                         shard,
                         kv: self.shards[&shard].kv.clone(),
+                        ids: self.shards[&shard].ids.clone(),
                     };
                     let self_ck = ClerkCore::<Op, Reply>::new(self.cfg.groups[&self.gid].clone());
                     let del = Op::DelShard {
@@ -157,14 +160,19 @@ impl State for ShardKv {
                 self.next_cfg = Some(cfg);
                 self.try_complete_config_change();
             }
-            Op::PutShard { cfg_num, shard, kv } => {
+            Op::PutShard {
+                cfg_num,
+                shard,
+                kv,
+                ids,
+            } => {
                 if self.cfg.num < cfg_num || (self.cfg.num == cfg_num && self.next_cfg.is_none()) {
                     return Reply::WrongCfg;
                 }
                 if self.cfg.num > cfg_num || self.shards.contains_key(&shard) {
                     return Reply::Ok;
                 }
-                self.shards.insert(shard, Shard { kv });
+                self.shards.insert(shard, Shard { kv, ids });
                 self.try_complete_config_change();
             }
             Op::DelShard { cfg_num, shard } => {

@@ -1,6 +1,6 @@
 use crate::shard_ctrler::msg::{Config, ConfigId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Op {
@@ -9,10 +9,12 @@ pub enum Op {
         key: String,
     },
     Put {
+        id: u64,
         key: String,
         value: String,
     },
     Append {
+        id: u64,
         key: String,
         value: String,
     },
@@ -25,6 +27,7 @@ pub enum Op {
         cfg_num: ConfigId,
         shard: usize,
         kv: HashMap<String, String>,
+        ids: VecDeque<u32>,
     },
     DelShard {
         cfg_num: ConfigId,
