@@ -19,7 +19,7 @@ impl Clerk {
 
     pub async fn get(&self, key: String) -> String {
         match self.call(Op::Get { key }).await {
-            Reply::Get { value } => value,
+            Reply::Get { value } => value.unwrap_or_default(),
             _ => unreachable!(),
         }
     }
@@ -49,9 +49,9 @@ impl Clerk {
             }
             let gid = config.shards[shard];
             let ck = ClerkCore::<Op, Reply>::new(config.groups[&gid].clone());
-            match ck.call(args.clone()).await {
-                Reply::WrongGroup => continue,
-                r => return r,
+            match timeout(Duration::from_secs(1), ck.call(args.clone())).await {
+                Err(_) | Ok(Reply::WrongGroup) => continue,
+                Ok(r) => return r,
             }
         }
         unreachable!();

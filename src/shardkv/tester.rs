@@ -138,7 +138,10 @@ impl Tester {
         let group = &self.groups[group];
         let addrs = group.addrs.clone();
         let handle = self.handle.local_handle(group.addrs[i]);
-        let kv = handle.spawn(ShardKvServer::new(addrs, i, None)).await;
+        let ctrl_ck = CtrlerClerk::new(self.ctrler_addrs.clone());
+        let kv = handle
+            .spawn(ShardKvServer::new(ctrl_ck, addrs, group.gid, i, None))
+            .await;
         group.servers.lock().unwrap()[i] = Some(kv);
     }
 

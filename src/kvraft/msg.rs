@@ -9,8 +9,8 @@ pub enum Op {
 
 #[derive(thiserror::Error, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error {
-    #[error("not leader")]
-    NotLeader(usize),
+    #[error("not leader, hint: {hint}")]
+    NotLeader { hint: usize },
     #[error("timeout")]
     Timeout,
     #[error("failed to reach consensus")]

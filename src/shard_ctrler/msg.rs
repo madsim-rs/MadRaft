@@ -21,7 +21,7 @@ pub struct Config {
 pub enum Op {
     Query {
         /// desired config number
-        num: Option<ConfigId>,
+        num: ConfigId,
     },
     Join {
         /// new GID -> servers mappings

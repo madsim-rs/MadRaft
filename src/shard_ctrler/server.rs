@@ -33,11 +33,9 @@ impl State for ShardInfo {
         }
         self.ids.push(id);
         match cmd {
-            Op::Query { num: None } => {
-                return Some(self.config.last().unwrap().clone());
-            }
-            Op::Query { num: Some(num) } => {
-                return Some(self.config[num as usize].clone());
+            Op::Query { num } => {
+                let num = (num as usize).min(self.config.len() - 1);
+                return Some(self.config[num].clone());
             }
             Op::Join { groups } if unique => {
                 let mut cfg = self.config.last().unwrap().clone();

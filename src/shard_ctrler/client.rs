@@ -14,11 +14,11 @@ impl Clerk {
     }
 
     pub async fn query(&self) -> Config {
-        self.core.call(Op::Query { num: None }).await.unwrap()
+        self.core.call(Op::Query { num: u64::MAX }).await.unwrap()
     }
 
     pub async fn query_at(&self, num: u64) -> Config {
-        self.core.call(Op::Query { num: Some(num) }).await.unwrap()
+        self.core.call(Op::Query { num }).await.unwrap()
     }
 
     pub async fn join(&self, groups: HashMap<Gid, Vec<SocketAddr>>) {

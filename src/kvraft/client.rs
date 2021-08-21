@@ -60,7 +60,7 @@ where
         let net = net::NetLocalHandle::current();
         let mut i = self.leader.load(Ordering::Relaxed);
         loop {
-            debug!("->{} {:?}", i, args);
+            debug!("[{:04x}] ->{} {:?}", id as u16, i, args);
             match net
                 .call_timeout::<(u64, Req), Result<Rsp, Error>>(
                     self.servers[i],
@@ -71,22 +71,22 @@ where
             {
                 // client side error
                 Err(e) => {
-                    debug!("<-{} {:?}", i, e);
+                    debug!("[{:04x}] <-{} {:?}", id as u16, i, e);
                     i = (i + 1) % self.servers.len();
                     continue;
                 }
                 // server side error
                 Ok(Err(e)) => {
-                    debug!("<-{} {:?}", i, e);
-                    if let Error::NotLeader(leader) = e {
-                        i = leader;
+                    debug!("[{:04x}] <-{} {:?}", id as u16, i, e);
+                    if let Error::NotLeader { hint } = e {
+                        i = hint;
                     } else {
                         i = (i + 1) % self.servers.len();
                     }
                     continue;
                 }
                 Ok(Ok(v)) => {
-                    debug!("<-{} ok", i);
+                    debug!("[{:04x}] <-{} Ok", id as u16, i);
                     self.leader.store(i, Ordering::Relaxed);
                     return v;
                 }
