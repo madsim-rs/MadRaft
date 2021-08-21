@@ -45,12 +45,8 @@ impl Op {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Reply {
-    Get {
-        value: Option<String>,
-    },
+    Get { value: Option<String> },
     Ok,
-    /// Data is moving during configuration change.
-    Moving,
     WrongCfg,
     WrongGroup,
 }

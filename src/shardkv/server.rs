@@ -82,17 +82,21 @@ impl State for ShardKv {
         self.ids.push_back(id);
 
         match cmd {
-            Op::Put { key, value } if unique => {
+            Op::Put { key, value } => {
                 if let Some(shard) = self.try_serve(&key) {
-                    shard.kv.insert(key, value);
+                    if unique {
+                        shard.kv.insert(key, value);
+                    }
                 } else {
                     // TODO: return Moving?
                     return Reply::WrongGroup;
                 }
             }
-            Op::Append { key, value } if unique => {
+            Op::Append { key, value } => {
                 if let Some(shard) = self.try_serve(&key) {
-                    shard.kv.entry(key).or_default().push_str(&value);
+                    if unique {
+                        shard.kv.entry(key).or_default().push_str(&value);
+                    }
                 } else {
                     // TODO: return Moving?
                     return Reply::WrongGroup;
@@ -108,7 +112,7 @@ impl State for ShardKv {
                     return Reply::WrongGroup;
                 }
             }
-            Op::CfgChange { cfg } if unique => {
+            Op::CfgChange { cfg } => {
                 if !(cfg.num == self.cfg.num + 1 && self.next_cfg.is_none()) {
                     return Reply::WrongCfg;
                 }
@@ -153,7 +157,7 @@ impl State for ShardKv {
                 self.next_cfg = Some(cfg);
                 self.try_complete_config_change();
             }
-            Op::PutShard { cfg_num, shard, kv } if unique => {
+            Op::PutShard { cfg_num, shard, kv } => {
                 if self.cfg.num != cfg_num || self.next_cfg.is_none() {
                     return Reply::WrongCfg;
                 }
@@ -163,14 +167,13 @@ impl State for ShardKv {
                 self.shards.insert(shard, Shard { kv });
                 self.try_complete_config_change();
             }
-            Op::DelShard { cfg_num, shard } if unique => {
+            Op::DelShard { cfg_num, shard } => {
                 if self.cfg.num != cfg_num || self.next_cfg.is_none() {
                     return Reply::WrongCfg;
                 }
                 self.shards.remove(&shard);
                 self.try_complete_config_change();
             }
-            _ => {}
         }
         Reply::Ok
     }
@@ -204,7 +207,7 @@ impl ShardKv {
                 return;
             }
         }
-        debug!("end config change: {}->{}", self.cfg.num, next_cfg.num);
+        debug!("end config change: {:?}->{:?}", self.cfg, next_cfg);
         self.cfg = self.next_cfg.take().unwrap();
     }
 }

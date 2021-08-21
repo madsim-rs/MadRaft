@@ -14,7 +14,7 @@ use std::{
 };
 
 pub trait State: net::Message {
-    type Command: net::Message;
+    type Command: net::Message + Clone;
     type Output: net::Message;
     fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output;
 }
@@ -70,8 +70,8 @@ impl<S: State> Server<S> {
                     }
                     raft::ApplyMsg::Command { index, data } => {
                         let (id, cmd): (u64, S::Command) = bincode::deserialize(&data).unwrap();
-                        debug!("apply [{:04x}] {:?}", id as u16, cmd);
-                        let ret = state0.lock().unwrap().apply(id, cmd);
+                        let ret = state0.lock().unwrap().apply(id, cmd.clone());
+                        debug!("apply [{:04x}] {:?} => {:?}", id as u16, cmd, ret);
                         state_index = index;
                         rpcs0.complete(index, id, ret);
                     }

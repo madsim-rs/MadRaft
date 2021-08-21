@@ -86,7 +86,7 @@ where
                     continue;
                 }
                 Ok(Ok(v)) => {
-                    debug!("[{:04x}] <-{} Ok", id as u16, i);
+                    debug!("[{:04x}] <-{} {:?}", id as u16, i, v);
                     self.leader.store(i, Ordering::Relaxed);
                     return v;
                 }

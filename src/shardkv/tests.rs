@@ -522,8 +522,9 @@ async fn challenge2_unaffected_4b() {
     // start using this updated config. Gets to any key k such that
     // owned[shard(k)] == true should now be served by group 101.
     time::sleep(Duration::from_secs(1)).await;
-    for (i, (k, v)) in kvs.iter_mut().enumerate() {
-        if owned.contains(&i) {
+    for (k, v) in kvs.iter_mut() {
+        let shard = super::key2shard(k);
+        if owned.contains(&shard) {
             *v = "101".into();
             ck.put(k.clone(), "101".into()).await;
         }
