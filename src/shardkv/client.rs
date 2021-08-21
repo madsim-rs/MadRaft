@@ -34,7 +34,7 @@ impl Clerk {
 
     async fn call(&self, args: Op) -> Reply {
         let shard = key2shard(args.key());
-        for iter in 0.. {
+        for iter in 0..100 {
             let config = if iter == 0 {
                 self.config.lock().unwrap().clone()
             } else {
@@ -54,6 +54,6 @@ impl Clerk {
                 Ok(r) => return r,
             }
         }
-        unreachable!();
+        panic!("failed to call {:?}", args);
     }
 }

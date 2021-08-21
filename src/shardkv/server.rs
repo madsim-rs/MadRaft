@@ -158,18 +158,21 @@ impl State for ShardKv {
                 self.try_complete_config_change();
             }
             Op::PutShard { cfg_num, shard, kv } => {
-                if self.cfg.num != cfg_num || self.next_cfg.is_none() {
+                if self.cfg.num < cfg_num || (self.cfg.num == cfg_num && self.next_cfg.is_none()) {
                     return Reply::WrongCfg;
                 }
-                if self.shards.contains_key(&shard) {
+                if self.cfg.num > cfg_num || self.shards.contains_key(&shard) {
                     return Reply::Ok;
                 }
                 self.shards.insert(shard, Shard { kv });
                 self.try_complete_config_change();
             }
             Op::DelShard { cfg_num, shard } => {
-                if self.cfg.num != cfg_num || self.next_cfg.is_none() {
+                if self.cfg.num < cfg_num || (self.cfg.num == cfg_num && self.next_cfg.is_none()) {
                     return Reply::WrongCfg;
+                }
+                if self.cfg.num > cfg_num || !self.shards.contains_key(&shard) {
+                    return Reply::Ok;
                 }
                 self.shards.remove(&shard);
                 self.try_complete_config_change();
@@ -207,7 +210,7 @@ impl ShardKv {
                 return;
             }
         }
-        debug!("end config change: {:?}->{:?}", self.cfg, next_cfg);
+        debug!("end config change: {}->{}", self.cfg.num, next_cfg.num);
         self.cfg = self.next_cfg.take().unwrap();
     }
 }
