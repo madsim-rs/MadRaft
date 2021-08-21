@@ -37,7 +37,11 @@ impl ShardKvServer {
             loop {
                 let num = state.lock().unwrap().cfg.num;
                 let cfg = ctrl_ck.query_at(num + 1).await;
-                if cfg.num == num + 1 {
+                let need = {
+                    let state = state.lock().unwrap();
+                    cfg.num == state.cfg.num + 1 && state.next_cfg.is_none()
+                };
+                if need {
                     self_ck.call(Op::CfgChange { cfg }).await;
                 }
                 sleep(Duration::from_millis(100)).await;
@@ -134,7 +138,14 @@ impl State for ShardKv {
                         shard,
                     };
                     task::spawn(async move {
-                        dst_ck.call(put).await;
+                        loop {
+                            match dst_ck.call(put.clone()).await {
+                                // wait for the group to enter the migration state
+                                Reply::WrongCfg => sleep(Duration::from_millis(100)).await,
+                                Reply::Ok => break,
+                                e => panic!("unexpected reply: {:?}", e),
+                            }
+                        }
                         self_ck.call(del).await;
                     })
                     .detach();
@@ -145,6 +156,9 @@ impl State for ShardKv {
             Op::PutShard { cfg_num, shard, kv } if unique => {
                 if self.cfg.num != cfg_num || self.next_cfg.is_none() {
                     return Reply::WrongCfg;
+                }
+                if self.shards.contains_key(&shard) {
+                    return Reply::Ok;
                 }
                 self.shards.insert(shard, Shard { kv });
                 self.try_complete_config_change();
