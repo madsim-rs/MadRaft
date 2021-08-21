@@ -17,12 +17,12 @@ pub struct Tester {
     n: usize,
 
     ctrler_addrs: Vec<SocketAddr>,
-    ctrlers: Vec<Arc<ShardCtrler>>,
+    _ctrlers: Vec<Arc<ShardCtrler>>,
     ctrler_ck: CtrlerClerk,
 
     groups: Vec<Group>,
 
-    max_raft_state: Option<u64>,
+    max_raft_state: Option<usize>,
 
     // begin()/end() statistics
     t0: Instant,
@@ -35,7 +35,7 @@ struct Group {
 }
 
 impl Tester {
-    pub async fn new(n: usize, unreliable: bool, max_raft_state: Option<u64>) -> Tester {
+    pub async fn new(n: usize, unreliable: bool, max_raft_state: Option<usize>) -> Tester {
         let handle = Handle::current();
         if unreliable {
             handle.net.update_config(|cfg| {
@@ -52,7 +52,7 @@ impl Tester {
         for i in 0..n_ctrler {
             let handle = handle.local_handle(ctrler_addrs[i]);
             let ctrler = handle
-                .spawn(ShardCtrler::new(ctrler_addrs.clone(), i, None))
+                .spawn(ShardCtrler::new(ctrler_addrs.clone(), i, max_raft_state))
                 .await;
             ctrlers.push(ctrler);
         }
@@ -73,7 +73,7 @@ impl Tester {
             handle,
             n,
             ctrler_addrs,
-            ctrlers,
+            _ctrlers: ctrlers,
             ctrler_ck,
             groups,
             max_raft_state,
@@ -95,7 +95,7 @@ impl Tester {
                 let snap_size = self.handle.fs.get_file_size(addr, "snapshot").unwrap_or(0);
                 if let Some(limit) = self.max_raft_state {
                     assert!(
-                        state_size <= 8 * limit,
+                        state_size as usize <= 8 * limit,
                         "raft state size {} exceed limit {}",
                         state_size,
                         limit
@@ -140,7 +140,13 @@ impl Tester {
         let handle = self.handle.local_handle(group.addrs[i]);
         let ctrl_ck = CtrlerClerk::new(self.ctrler_addrs.clone());
         let kv = handle
-            .spawn(ShardKvServer::new(ctrl_ck, addrs, group.gid, i, None))
+            .spawn(ShardKvServer::new(
+                ctrl_ck,
+                addrs,
+                group.gid,
+                i,
+                self.max_raft_state,
+            ))
             .await;
         group.servers.lock().unwrap()[i] = Some(kv);
     }
