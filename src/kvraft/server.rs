@@ -7,7 +7,7 @@ use madsim::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::{self, Debug},
     net::SocketAddr,
     sync::{Arc, Mutex},
@@ -178,8 +178,7 @@ pub type KvServer = Server<Kv>;
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Kv {
     kv: HashMap<String, String>,
-    // A circular queue with max capacity 50
-    ids: Vec<u64>,
+    ids: VecDeque<u32>,
 }
 
 impl State for Kv {
@@ -187,21 +186,27 @@ impl State for Kv {
     type Output = String;
 
     fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output {
-        let unique = !self.ids.contains(&id);
-        if self.ids.len() > 50 {
-            self.ids.remove(0);
-        }
-        self.ids.push(id);
         match cmd {
-            Op::Put { key, value } if unique => {
+            Op::Put { key, value } if self.test_dup_id(id) => {
                 self.kv.insert(key, value);
             }
-            Op::Append { key, value } if unique => {
+            Op::Append { key, value } if self.test_dup_id(id) => {
                 self.kv.entry(key).or_default().push_str(&value);
             }
             Op::Get { key } => return self.kv.get(&key).cloned().unwrap_or_default(),
             _ => {}
         }
         "".into()
+    }
+}
+
+impl Kv {
+    fn test_dup_id(&mut self, id: u64) -> bool {
+        let unique = !self.ids.contains(&(id as u32));
+        if self.ids.len() >= 100 {
+            self.ids.pop_front();
+        }
+        self.ids.push_back(id as u32);
+        unique
     }
 }

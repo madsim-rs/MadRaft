@@ -90,6 +90,7 @@ struct Raft {
     snapshot: Vec<u8>,
 
     last_apply_entries_received: Instant,
+    last_leader: usize,
 }
 
 /// State of a raft peer.
@@ -178,6 +179,7 @@ impl RaftHandle {
             match_index: vec![0; n],
             snapshot: vec![],
             last_apply_entries_received: Instant::now(),
+            last_leader: 0,
         }));
         let handle = RaftHandle { inner };
         // initialize from state persisted before a crash
@@ -381,8 +383,11 @@ impl Raft {
     fn start(&mut self, data: &[u8]) -> Result<Start> {
         // Your code here (2B).
         if !self.state.is_leader() {
-            // TODO: next leader
-            let leader = (self.me + 1) % self.peers.len();
+            let leader = if self.last_leader == self.me {
+                (self.me + 1) % self.peers.len()
+            } else {
+                self.last_leader
+            };
             return Err(Error::NotLeader(leader));
         }
         let index = self.log.len() as u64;
@@ -750,6 +755,7 @@ impl Raft {
             self.transfer_state(args.term, Role::Follower, "higher term (<-AE)");
         }
         self.last_apply_entries_received = Instant::now();
+        self.last_leader = args.leader_id as usize;
         // Reply false if log doesn’t contain an entry at prevLogIndex
         // whose term matches prevLogTerm (§5.3)
         if !matches!(self.log.get(args.prev_log_index as usize), Some(log) if log.term == args.prev_log_term)
