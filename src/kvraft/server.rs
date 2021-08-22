@@ -1,30 +1,24 @@
 use super::msg::*;
 use crate::raft;
-use futures::{channel::oneshot, StreamExt};
-use madsim::{
-    fs, net, task,
-    time::{timeout, Duration},
-};
+use madsim::net;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
     fmt::{self, Debug},
+    marker::PhantomData,
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
-pub trait State: net::Message {
+pub trait State: net::Message + Default {
     type Command: net::Message + Clone;
     type Output: net::Message;
-    fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output;
+    fn apply(&mut self, cmd: Self::Command) -> Self::Output;
 }
 
 pub struct Server<S: State> {
     rf: raft::RaftHandle,
     me: usize,
-    rpcs: Arc<Rpcs<S::Output>>,
-    state: Arc<Mutex<S>>,
-    _bg_task: task::Task<()>,
+    _marker: PhantomData<S>,
 }
 
 impl<S: State> fmt::Debug for Server<S> {
@@ -33,65 +27,19 @@ impl<S: State> fmt::Debug for Server<S> {
     }
 }
 
-impl<S: State + Default> Server<S> {
+impl<S: State> Server<S> {
     pub async fn new(
         servers: Vec<SocketAddr>,
         me: usize,
         max_raft_state: Option<usize>,
     ) -> Arc<Self> {
-        Self::new_with_state(servers, me, max_raft_state, S::default()).await
-    }
-}
-
-impl<S: State> Server<S> {
-    pub async fn new_with_state(
-        servers: Vec<SocketAddr>,
-        me: usize,
-        max_raft_state: Option<usize>,
-        state0: S,
-    ) -> Arc<Self> {
         // You may need initialization code here.
-        let (rf, mut apply_ch) = raft::RaftHandle::new(servers, me).await;
-
-        let rpcs = Arc::new(Rpcs::default());
-        let state = Arc::new(Mutex::new(state0));
-
-        let rpcs0 = rpcs.clone();
-        let rf0 = rf.clone();
-        let state0 = state.clone();
-        let _bg_task = task::spawn_local(async move {
-            while let Some(msg) = apply_ch.next().await {
-                let state_index;
-                match msg {
-                    raft::ApplyMsg::Snapshot { index, data, .. } => {
-                        debug!("apply snapshot at index {}", index);
-                        *state0.lock().unwrap() = bincode::deserialize(&data).unwrap();
-                        state_index = index;
-                    }
-                    raft::ApplyMsg::Command { index, data } => {
-                        let (id, cmd): (u64, S::Command) = bincode::deserialize(&data).unwrap();
-                        let ret = state0.lock().unwrap().apply(id, cmd.clone());
-                        debug!("apply [{:04x}] {:?} => {:?}", id as u16, cmd, ret);
-                        state_index = index;
-                        rpcs0.complete(index, id, ret);
-                    }
-                }
-                // snapshot if needed
-                if let Some(size) = max_raft_state {
-                    if fs::metadata("state").await.map(|m| m.len()).unwrap_or(0) >= size as u64 {
-                        let data = bincode::serialize(&*state0.lock().unwrap()).unwrap();
-                        rf0.snapshot(state_index, &data).await.unwrap();
-                    }
-                }
-            }
-        });
+        let (rf, apply_ch) = raft::RaftHandle::new(servers, me).await;
 
         let this = Arc::new(Server {
             rf,
             me,
-            rpcs,
-            state,
-            _bg_task,
+            _marker: PhantomData,
         });
         this.start_rpc_server();
         this
@@ -101,9 +49,9 @@ impl<S: State> Server<S> {
         let net = net::NetLocalHandle::current();
 
         let this = self.clone();
-        net.add_rpc_handler(move |(id, cmd): (u64, S::Command)| {
+        net.add_rpc_handler(move |cmd: S::Command| {
             let this = this.clone();
-            async move { this.apply(id, cmd).await }
+            async move { this.apply(cmd).await }
         });
     }
 
@@ -117,59 +65,8 @@ impl<S: State> Server<S> {
         self.rf.is_leader()
     }
 
-    pub fn state(&self) -> &Arc<Mutex<S>> {
-        &self.state
-    }
-
-    async fn apply(&self, id: u64, cmd: S::Command) -> Result<S::Output, Error> {
-        let index = match self
-            .rf
-            .start(&bincode::serialize(&(id, cmd)).unwrap())
-            .await
-        {
-            Ok(s) => s.index,
-            Err(raft::Error::NotLeader(hint)) => return Err(Error::NotLeader { hint }),
-            _ => unreachable!(),
-        };
-        let recver = self.rpcs.register(index, id);
-        let output = timeout(Duration::from_millis(500), recver)
-            .await
-            .map_err(|_| Error::Timeout)?
-            .map_err(|_| Error::Failed)?;
-        Ok(output)
-    }
-}
-
-/// Pending RPCs register center.
-struct Rpcs<T> {
-    // { index -> (id, sender) }
-    rpcs: Mutex<HashMap<u64, (u64, oneshot::Sender<T>)>>,
-}
-
-impl<T> Default for Rpcs<T> {
-    fn default() -> Self {
-        Self {
-            rpcs: Default::default(),
-        }
-    }
-}
-
-impl<T> Rpcs<T> {
-    fn register(&self, index: u64, id: u64) -> oneshot::Receiver<T> {
-        let (sender, recver) = oneshot::channel();
-        self.rpcs.lock().unwrap().insert(index, (id, sender));
-        recver
-    }
-
-    fn complete(&self, index: u64, id: u64, value: T) {
-        let mut rpcs = self.rpcs.lock().unwrap();
-        if let Some((id0, sender)) = rpcs.remove(&index) {
-            if id == id0 {
-                // message match, success
-                let _ = sender.send(value);
-            }
-            // otherwise drop the sender
-        }
+    async fn apply(&self, cmd: S::Command) -> Result<S::Output, Error> {
+        todo!("apply command");
     }
 }
 
@@ -177,36 +74,14 @@ pub type KvServer = Server<Kv>;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Kv {
-    kv: HashMap<String, String>,
-    ids: VecDeque<u32>,
+    // Your data here.
 }
 
 impl State for Kv {
     type Command = Op;
     type Output = String;
 
-    fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output {
-        match cmd {
-            Op::Put { key, value } if self.test_dup_id(id) => {
-                self.kv.insert(key, value);
-            }
-            Op::Append { key, value } if self.test_dup_id(id) => {
-                self.kv.entry(key).or_default().push_str(&value);
-            }
-            Op::Get { key } => return self.kv.get(&key).cloned().unwrap_or_default(),
-            _ => {}
-        }
-        "".into()
-    }
-}
-
-impl Kv {
-    fn test_dup_id(&mut self, id: u64) -> bool {
-        let unique = !self.ids.contains(&(id as u32));
-        if self.ids.len() >= 100 {
-            self.ids.pop_front();
-        }
-        self.ids.push_back(id as u32);
-        unique
+    fn apply(&mut self, cmd: Self::Command) -> Self::Output {
+        todo!("apply command");
     }
 }

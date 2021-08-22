@@ -1,13 +1,6 @@
 use super::msg::*;
-use madsim::{
-    net,
-    rand::{self, Rng},
-    time::*,
-};
-use std::{
-    net::SocketAddr,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use madsim::{net, time::*};
+use std::net::SocketAddr;
 
 pub struct Clerk {
     core: ClerkCore<Op, String>,
@@ -38,7 +31,6 @@ impl Clerk {
 
 pub struct ClerkCore<Req, Rsp> {
     servers: Vec<SocketAddr>,
-    leader: AtomicUsize,
     _mark: std::marker::PhantomData<(Req, Rsp)>,
 }
 
@@ -50,47 +42,22 @@ where
     pub fn new(servers: Vec<SocketAddr>) -> Self {
         ClerkCore {
             servers,
-            leader: AtomicUsize::new(0),
             _mark: std::marker::PhantomData,
         }
     }
 
     pub async fn call(&self, args: Req) -> Rsp {
-        let id: u64 = rand::rng().gen();
         let net = net::NetLocalHandle::current();
-        let mut i = self.leader.load(Ordering::Relaxed);
-        loop {
-            debug!("[{:04x}] ->{} {:?}", id as u16, i, args);
-            match net
-                .call_timeout::<(u64, Req), Result<Rsp, Error>>(
+        for i in 0..self.servers.len() {
+            let ret = net
+                .call_timeout::<Req, Result<Rsp, Error>>(
                     self.servers[i],
-                    (id, args.clone()),
+                    args.clone(),
                     Duration::from_millis(500),
                 )
-                .await
-            {
-                // client side error
-                Err(e) => {
-                    debug!("[{:04x}] <-{} {:?}", id as u16, i, e);
-                    i = (i + 1) % self.servers.len();
-                    continue;
-                }
-                // server side error
-                Ok(Err(e)) => {
-                    debug!("[{:04x}] <-{} {:?}", id as u16, i, e);
-                    if let Error::NotLeader { hint } = e {
-                        i = hint;
-                    } else {
-                        i = (i + 1) % self.servers.len();
-                    }
-                    continue;
-                }
-                Ok(Ok(v)) => {
-                    debug!("[{:04x}] <-{} {:?}", id as u16, i, v);
-                    self.leader.store(i, Ordering::Relaxed);
-                    return v;
-                }
-            }
+                .await;
+            todo!("handle RPC results");
         }
+        todo!("handle RPC results");
     }
 }
