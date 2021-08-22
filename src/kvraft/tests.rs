@@ -143,7 +143,7 @@ async fn generic_test(
                 let n = all.len();
                 let mut rng = rand::rng();
                 while !done.load(Ordering::Relaxed) {
-                    rng.with(|rng| all.shuffle(rng));
+                    all.shuffle(&mut rng);
                     let (left, right) = all.split_at(rng.gen_range(0..n));
                     t.partition(left, right);
                     time::sleep(
