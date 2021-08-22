@@ -156,7 +156,6 @@ impl RaftHandle {
         last_included_index: u64,
         snapshot: &[u8],
     ) -> bool {
-        drop((last_included_term, last_included_index, snapshot));
         todo!()
     }
 
@@ -165,7 +164,6 @@ impl RaftHandle {
     /// (and including) that index. Raft should now trim its log as much as
     /// possible.
     pub async fn snapshot(&self, index: u64, snapshot: &[u8]) -> Result<()> {
-        drop((index, snapshot));
         todo!()
     }
 
@@ -196,7 +194,6 @@ impl RaftHandle {
     async fn restore(&self) -> io::Result<()> {
         match fs::read("snapshot").await {
             Ok(snapshot) => {
-                drop(snapshot);
                 todo!("restore snapshot");
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -205,7 +202,6 @@ impl RaftHandle {
         match fs::read("state").await {
             Ok(state) => {
                 let persist: Persist = bincode::deserialize(&state).unwrap();
-                drop(persist);
                 todo!("restore state");
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -244,7 +240,6 @@ impl Raft {
             let leader = (self.me + 1) % self.peers.len();
             return Err(Error::NotLeader(leader));
         }
-        drop(data);
         todo!("start agreement");
     }
 
@@ -258,7 +253,6 @@ impl Raft {
     }
 
     fn request_vote(&mut self, args: RequestVoteArgs) -> RequestVoteReply {
-        drop(args);
         todo!("handle RequestVote RPC");
     }
 
@@ -292,7 +286,6 @@ impl Raft {
         task::spawn(async move {
             // handle RPC tasks in completion order
             while let Some(res) = rpcs.next().await {
-                drop(res);
                 todo!("handle RPC results");
             }
         })

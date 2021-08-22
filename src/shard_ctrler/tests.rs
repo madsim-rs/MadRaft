@@ -1,10 +1,7 @@
 use super::{tester::*, N_SHARDS};
 use futures::future;
 use log::*;
-use madsim::{
-    task,
-    time::{self, Duration},
-};
+use madsim::{task, time};
 use std::{collections::HashMap, net::SocketAddr};
 
 macro_rules! addrs {
