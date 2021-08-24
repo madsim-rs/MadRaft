@@ -13,7 +13,7 @@ use std::{
 };
 
 pub struct ShardKvServer {
-    inner: Arc<Server<ShardKv>>,
+    _inner: Arc<Server<ShardKv>>,
     _bg_task: task::Task<()>,
 }
 
@@ -30,8 +30,8 @@ impl ShardKvServer {
             gid,
             ..Default::default()
         };
-        let inner = Server::new_with_state(servers, me, max_raft_state, state0).await;
-        let state = inner.state().clone();
+        let _inner = Server::new_with_state(servers, me, max_raft_state, state0).await;
+        let state = _inner.state().clone();
         // background task to periodically poll new configurations
         let _bg_task = task::spawn(async move {
             loop {
@@ -47,7 +47,7 @@ impl ShardKvServer {
                 sleep(Duration::from_millis(100)).await;
             }
         });
-        Arc::new(ShardKvServer { inner, _bg_task })
+        Arc::new(ShardKvServer { _inner, _bg_task })
     }
 }
 

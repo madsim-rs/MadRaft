@@ -1,5 +1,5 @@
 use self::{logs::Logs, msg::*};
-use futures::{channel::mpsc, join, select, stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{channel::mpsc, join, select_biased, stream::FuturesUnordered, FutureExt, StreamExt};
 use madsim::{
     fs::{self, File},
     net,
@@ -483,7 +483,7 @@ impl Raft {
                     AllComplete,
                     Timeout,
                 }
-                let event = select! {
+                let event = select_biased! {
                     _ = time::sleep_until(deadline).fuse() => Event::Timeout,
                     ret = rpcs.next() => match ret {
                         None => Event::AllComplete,
