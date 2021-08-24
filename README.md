@@ -37,7 +37,7 @@ If a test fails, you will see a seed in the output:
 ---- raft::tests::initial_election_2a stdout ----
 thread 'raft::tests::initial_election_2a' panicked at 'expected one leader, got none', src/raft/tester.rs:91:9
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-seed=1629626496
+MADSIM_TEST_SEED=1629626496
 ```
 
 Run the test again with the seed, and you will get exactly the same output:
@@ -57,6 +57,26 @@ Run the test multiple times to make sure you solution can stably pass the test:
 ```sh
 MADSIM_TEST_NUM=100 cargo test --release
 ```
+
+### Ensure Determinism
+
+Sometimes you may find that the test is not deterministic :(
+
+Although the testing framework itself (MadSim) provides determinism, the entire system is not deterministic if your code introduces randomness.
+
+Here are some tips to avoid randomness:
+
+* Use `madsim::rand::rng` instead of `rand::thread_rng` to generate random numbers.
+* Use `futures::select_biased` instead of `futures::select` macro.
+* Do not **iterate** through a `HashMap`.
+
+To make sure your code is deterministic, run your test with the following environment variable:
+
+```sh
+MADSIM_TEST_CHECK_DETERMINISTIC=1 cargo test
+```
+
+Your test will be run at least twice with the same seed. If any non-determinism is detected, it will panic as soon as possible.
 
 Happy coding and Good luck!
 
