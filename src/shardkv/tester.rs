@@ -50,7 +50,7 @@ impl Tester {
             .collect::<Vec<_>>();
         let mut ctrlers = vec![];
         for i in 0..n_ctrler {
-            let handle = handle.local_handle(ctrler_addrs[i]);
+            let handle = handle.create_host(ctrler_addrs[i]).unwrap();
             let ctrler = handle
                 .spawn(ShardCtrler::new(ctrler_addrs.clone(), i, max_raft_state))
                 .await;
@@ -137,7 +137,7 @@ impl Tester {
         debug!("start_server({}, {})", group, i);
         let group = &self.groups[group];
         let addrs = group.addrs.clone();
-        let handle = self.handle.local_handle(group.addrs[i]);
+        let handle = self.handle.create_host(group.addrs[i]).unwrap();
         let ctrl_ck = CtrlerClerk::new(self.ctrler_addrs.clone());
         let kv = handle
             .spawn(ShardKvServer::new(

@@ -1,4 +1,5 @@
 use super::N_SHARDS;
+use madsim::Request;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr};
 
@@ -17,7 +18,8 @@ pub struct Config {
     pub groups: HashMap<Gid, Vec<SocketAddr>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Request)]
+#[rtype("Option<Config>")]
 pub enum Op {
     Query {
         /// desired config number

@@ -24,9 +24,8 @@ impl Default for ShardInfo {
 
 impl State for ShardInfo {
     type Command = Op;
-    type Output = Option<Config>;
 
-    fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output {
+    fn apply(&mut self, id: u64, cmd: Self::Command) -> Option<Config> {
         let unique = !self.ids.contains(&id);
         if self.ids.len() > 50 {
             self.ids.remove(0);

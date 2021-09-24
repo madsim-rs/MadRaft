@@ -165,7 +165,8 @@ impl RaftTester {
     pub async fn start(&self, i: usize, cmd: Entry) -> Result<Start> {
         let raft = self.rafts.lock().unwrap()[i].as_ref().unwrap().clone();
         self.handle
-            .local_handle(self.addrs[i])
+            .get_host(self.addrs[i])
+            .unwrap()
             .spawn(async move { raft.start(&bincode::serialize(&cmd).unwrap()).await })
             .await
     }
@@ -294,7 +295,7 @@ impl RaftTester {
         self.crash1(i);
 
         let addrs = self.addrs.clone();
-        let handle = self.handle.local_handle(self.addrs[i]);
+        let handle = self.handle.create_host(self.addrs[i]).unwrap();
         let (raft, mut apply_recver) = handle.spawn(RaftHandle::new(addrs, i)).await;
         self.rafts.lock().unwrap()[i] = Some(raft.clone());
 

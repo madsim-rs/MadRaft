@@ -2,10 +2,12 @@ use super::msg::*;
 use crate::raft;
 use futures::{channel::oneshot, StreamExt};
 use madsim::{
-    fs, net, task,
+    fs,
+    net::{self, rpc::Request},
+    task,
     time::{timeout, Duration},
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     fmt::{self, Debug},
@@ -13,16 +15,25 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub trait State: net::Message {
-    type Command: net::Message + Clone;
-    type Output: net::Message;
-    fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output;
+pub trait State: Serialize + DeserializeOwned + Debug + Send + 'static {
+    type Command: Request + Clone + Debug;
+    fn apply(&mut self, id: u64, cmd: Self::Command) -> <Self::Command as Request>::Response;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct WithId<R> {
+    pub id: u64,
+    pub cmd: R,
+}
+
+impl<R: Request> Request for WithId<R> {
+    type Response = Result<R::Response, Error>;
 }
 
 pub struct Server<S: State> {
     rf: raft::RaftHandle,
     me: usize,
-    rpcs: Arc<Rpcs<S::Output>>,
+    rpcs: Arc<Rpcs<<S::Command as Request>::Response>>,
     state: Arc<Mutex<S>>,
     _bg_task: task::Task<()>,
 }
@@ -38,7 +49,10 @@ impl<S: State + Default> Server<S> {
         servers: Vec<SocketAddr>,
         me: usize,
         max_raft_state: Option<usize>,
-    ) -> Arc<Self> {
+    ) -> Arc<Self>
+    where
+        <S::Command as Request>::Response: Debug,
+    {
         Self::new_with_state(servers, me, max_raft_state, S::default()).await
     }
 }
@@ -49,7 +63,10 @@ impl<S: State> Server<S> {
         me: usize,
         max_raft_state: Option<usize>,
         state0: S,
-    ) -> Arc<Self> {
+    ) -> Arc<Self>
+    where
+        <S::Command as Request>::Response: Debug,
+    {
         // You may need initialization code here.
         let (rf, mut apply_ch) = raft::RaftHandle::new(servers, me).await;
 
@@ -101,9 +118,9 @@ impl<S: State> Server<S> {
         let net = net::NetLocalHandle::current();
 
         let this = self.clone();
-        net.add_rpc_handler(move |(id, cmd): (u64, S::Command)| {
+        net.add_rpc_handler(move |req: WithId<S::Command>| {
             let this = this.clone();
-            async move { this.apply(id, cmd).await }
+            async move { this.apply(req.id, req.cmd).await }
         });
     }
 
@@ -121,7 +138,11 @@ impl<S: State> Server<S> {
         &self.state
     }
 
-    async fn apply(&self, id: u64, cmd: S::Command) -> Result<S::Output, Error> {
+    async fn apply(
+        &self,
+        id: u64,
+        cmd: S::Command,
+    ) -> Result<<S::Command as Request>::Response, Error> {
         let index = match self
             .rf
             .start(&bincode::serialize(&(id, cmd)).unwrap())
@@ -183,9 +204,8 @@ pub struct Kv {
 
 impl State for Kv {
     type Command = Op;
-    type Output = String;
 
-    fn apply(&mut self, id: u64, cmd: Self::Command) -> Self::Output {
+    fn apply(&mut self, id: u64, cmd: Op) -> String {
         match cmd {
             Op::Put { key, value } if self.test_dup_id(id) => {
                 self.kv.insert(key, value);

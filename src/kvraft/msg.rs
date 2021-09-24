@@ -1,6 +1,8 @@
+use madsim::Request;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Request)]
+#[rtype("String")]
 pub enum Op {
     Get { key: String },
     Put { key: String, value: String },

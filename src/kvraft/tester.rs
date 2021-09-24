@@ -128,10 +128,11 @@ impl Tester {
     // now enable only connections to servers in to[].
     pub fn make_client(&self, to: &[usize]) -> Clerk {
         let id = ClerkId(self.next_client_id.fetch_add(1, Ordering::SeqCst));
+        let handle = self.handle.create_host(id.to_addr()).unwrap();
         self.connect_client(id, to);
         Clerk {
             id,
-            handle: self.handle.local_handle(id.to_addr()),
+            handle,
             ck: Arc::new(client::Clerk::new(self.addrs.clone())),
             ops: self.ops.clone(),
         }
@@ -161,7 +162,7 @@ impl Tester {
     pub async fn start_server(&self, i: usize) {
         debug!("start_server({})", i);
         let addrs = self.addrs.clone();
-        let handle = self.handle.local_handle(self.addrs[i]);
+        let handle = self.handle.create_host(self.addrs[i]).unwrap();
         let kv = handle
             .spawn(server::KvServer::new(addrs, i, self.maxraftstate))
             .await;

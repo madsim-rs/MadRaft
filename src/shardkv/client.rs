@@ -53,7 +53,7 @@ impl Clerk {
                 continue;
             }
             let gid = config.shards[shard];
-            let ck = ClerkCore::<Op, Reply>::new(config.groups[&gid].clone());
+            let ck = ClerkCore::<Op>::new(config.groups[&gid].clone());
             match timeout(Duration::from_secs(1), ck.call(args.clone())).await {
                 Err(_) | Ok(Reply::WrongGroup) => continue,
                 Ok(r) => return r,

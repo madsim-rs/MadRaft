@@ -25,7 +25,7 @@ impl ShardKvServer {
         me: usize,
         max_raft_state: Option<usize>,
     ) -> Arc<Self> {
-        let self_ck = ClerkCore::<Op, Reply>::new(servers.clone());
+        let self_ck = ClerkCore::<Op>::new(servers.clone());
         let state0 = ShardKv {
             gid,
             ..Default::default()
@@ -83,9 +83,8 @@ impl Shard {
 
 impl State for ShardKv {
     type Command = Op;
-    type Output = Reply;
 
-    fn apply(&mut self, _id: u64, cmd: Self::Command) -> Self::Output {
+    fn apply(&mut self, _id: u64, cmd: Self::Command) -> Reply {
         match cmd {
             Op::Put { id, key, value } => {
                 if let Some(shard) = self.try_serve(&key) {
@@ -132,14 +131,14 @@ impl State for ShardKv {
                     .filter(|&s| cfg.shards[s] != self.gid && self.cfg.shards[s] == self.gid)
                 {
                     let dst_gid = cfg.shards[shard];
-                    let dst_ck = ClerkCore::<Op, Reply>::new(cfg.groups[&dst_gid].clone());
+                    let dst_ck = ClerkCore::<Op>::new(cfg.groups[&dst_gid].clone());
                     let put = Op::PutShard {
                         cfg_num: self.cfg.num,
                         shard,
                         kv: self.shards[&shard].kv.clone(),
                         ids: self.shards[&shard].ids.clone(),
                     };
-                    let self_ck = ClerkCore::<Op, Reply>::new(self.cfg.groups[&self.gid].clone());
+                    let self_ck = ClerkCore::<Op>::new(self.cfg.groups[&self.gid].clone());
                     let del = Op::DelShard {
                         cfg_num: self.cfg.num,
                         shard,

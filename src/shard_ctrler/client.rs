@@ -3,7 +3,7 @@ use crate::kvraft::client::ClerkCore;
 use std::{collections::HashMap, net::SocketAddr};
 
 pub struct Clerk {
-    core: ClerkCore<Op, Option<Config>>,
+    core: ClerkCore<Op>,
 }
 
 impl Clerk {

@@ -1,16 +1,17 @@
-use super::msg::*;
+use super::{msg::*, server::WithId};
 use madsim::{
-    net,
+    net::{self, rpc::Request},
     rand::{self, Rng},
     time::*,
 };
 use std::{
+    fmt::Debug,
     net::SocketAddr,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
 pub struct Clerk {
-    core: ClerkCore<Op, String>,
+    core: ClerkCore<Op>,
 }
 
 impl Clerk {
@@ -36,16 +37,16 @@ impl Clerk {
     }
 }
 
-pub struct ClerkCore<Req, Rsp> {
+pub struct ClerkCore<Req> {
     servers: Vec<SocketAddr>,
     leader: AtomicUsize,
-    _mark: std::marker::PhantomData<(Req, Rsp)>,
+    _mark: std::marker::PhantomData<Req>,
 }
 
-impl<Req, Rsp> ClerkCore<Req, Rsp>
+impl<Req> ClerkCore<Req>
 where
-    Req: net::Message + Clone,
-    Rsp: net::Message,
+    Req: Request + Clone + Debug,
+    Req::Response: Debug,
 {
     pub fn new(servers: Vec<SocketAddr>) -> Self {
         ClerkCore {
@@ -55,16 +56,19 @@ where
         }
     }
 
-    pub async fn call(&self, args: Req) -> Rsp {
+    pub async fn call(&self, args: Req) -> Req::Response {
         let id: u64 = rand::rng().gen();
         let net = net::NetLocalHandle::current();
         let mut i = self.leader.load(Ordering::Relaxed);
         loop {
             debug!("[{:04x}] ->{} {:?}", id as u16, i, args);
             match net
-                .call_timeout::<(u64, Req), Result<Rsp, Error>>(
+                .call_timeout(
                     self.servers[i],
-                    (id, args.clone()),
+                    WithId {
+                        id,
+                        cmd: args.clone(),
+                    },
                     Duration::from_millis(500),
                 )
                 .await

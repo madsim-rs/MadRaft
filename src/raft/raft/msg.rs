@@ -1,6 +1,8 @@
+use madsim::Request;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Request)]
+#[rtype("RequestVoteReply")]
 pub struct RequestVoteArgs {
     pub term: u64,
     pub candidate_id: u64,
@@ -20,7 +22,8 @@ pub struct Log {
     pub data: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Request)]
+#[rtype("AppendEntriesReply")]
 pub struct AppendEntriesArgs {
     pub term: u64,
     pub leader_id: u64,
@@ -36,7 +39,8 @@ pub struct AppendEntriesReply {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Request)]
+#[rtype("InstallSnapshotReply")]
 pub struct InstallSnapshotArgs {
     pub term: u64,
     pub leader_id: u64,

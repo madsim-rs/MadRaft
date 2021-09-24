@@ -74,7 +74,7 @@ impl Tester {
     pub async fn start_server(&self, i: usize) {
         debug!("start_server({})", i);
         let addrs = self.addrs.clone();
-        let handle = self.handle.local_handle(self.addrs[i]);
+        let handle = self.handle.create_host(self.addrs[i]).unwrap();
         let kv = handle.spawn(ShardCtrler::new(addrs, i, None)).await;
         self.servers.lock().unwrap()[i] = Some(kv);
     }

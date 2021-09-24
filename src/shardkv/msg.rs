@@ -1,8 +1,10 @@
 use crate::shard_ctrler::msg::{Config, ConfigId};
+use madsim::Request;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Request)]
+#[rtype("Reply")]
 pub enum Op {
     // issued by client
     Get {

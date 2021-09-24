@@ -355,7 +355,7 @@ impl Raft {
 
         async move {
             // FIXME: crash on partial write
-            let file = File::create("state").await?;
+            let mut file = File::create("state").await?;
             file.write_all_at(&data, 0).await?;
             file.sync_all().await?;
             Ok(())
@@ -367,7 +367,7 @@ impl Raft {
         let f1 = self.persist();
         let f2 = async move {
             // FIXME: crash on partial write
-            let file = File::create("snapshot").await?;
+            let mut file = File::create("snapshot").await?;
             file.write_all_at(&snapshot, 0).await?;
             file.sync_all().await?;
             Ok(()) as io::Result<()>
@@ -468,7 +468,7 @@ impl Raft {
             .map(|(_, &peer)| {
                 let net = net.clone();
                 let args = args.clone();
-                async move { net.call::<_, RequestVoteReply>(peer, args).await }
+                async move { net.call(peer, args).await }
             })
             .collect::<FuturesUnordered<_>>();
         let deadline = Instant::now() + Self::generate_election_timeout();
@@ -569,11 +569,7 @@ impl Raft {
                     match task {
                         Task::InstallSnapshot(args) => {
                             let reply = match net
-                                .call_timeout::<_, InstallSnapshotReply>(
-                                    peer,
-                                    args,
-                                    Self::generate_heartbeat_interval(),
-                                )
+                                .call_timeout(peer, args, Self::generate_heartbeat_interval())
                                 .await
                             {
                                 Err(_) => continue,
@@ -599,11 +595,7 @@ impl Raft {
                         }
                         Task::AppendEntries(args) => {
                             let reply = match net
-                                .call_timeout::<_, AppendEntriesReply>(
-                                    peer,
-                                    args,
-                                    Self::generate_heartbeat_interval(),
-                                )
+                                .call_timeout(peer, args, Self::generate_heartbeat_interval())
                                 .await
                             {
                                 Err(_) => continue,
