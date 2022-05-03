@@ -2,7 +2,7 @@ use self::{logs::Logs, msg::*};
 use futures::{channel::mpsc, join, select_biased, stream::FuturesUnordered, FutureExt, StreamExt};
 use madsim::{
     fs::{self, File},
-    net,
+    net::Endpoint,
     rand::{self, Rng},
     task::Task,
     time::{self, *},
@@ -64,6 +64,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 struct Raft {
     peers: Vec<SocketAddr>,
     me: usize,
+
+    // network endpoint
+    ep: Arc<Endpoint>,
 
     // Your data here (2A, 2B, 2C).
     // Look at the paper's Figure 2 for a description of what
@@ -164,9 +167,11 @@ impl RaftHandle {
     pub async fn new(peers: Vec<SocketAddr>, me: usize) -> (Self, MsgRecver) {
         let n = peers.len();
         let (apply_ch, recver) = mpsc::unbounded();
+        let ep = Arc::new(Endpoint::bind(peers[me]).await.expect("failed to bind"));
         let inner = Arc::new(Mutex::new(Raft {
             peers,
             me,
+            ep: ep.clone(),
             apply_ch,
             this: Weak::default(),
             tasks_of_state: vec![],
@@ -184,7 +189,7 @@ impl RaftHandle {
         let handle = RaftHandle { inner };
         // initialize from state persisted before a crash
         handle.restore().await.expect("failed to restore");
-        handle.start_rpc_server();
+        handle.start_rpc_server(ep);
 
         let mut raft = handle.inner.lock().unwrap();
         raft.this = Arc::downgrade(&handle.inner);
@@ -283,23 +288,21 @@ impl RaftHandle {
         Ok(())
     }
 
-    fn start_rpc_server(&self) {
-        let net = net::NetLocalHandle::current();
-
+    fn start_rpc_server(&self, ep: Arc<Endpoint>) {
         let this = self.clone();
-        net.add_rpc_handler(move |args: RequestVoteArgs| {
+        ep.add_rpc_handler(move |args: RequestVoteArgs| {
             let this = this.clone();
             async move { this.request_vote(args).await.unwrap() }
         });
 
         let this = self.clone();
-        net.add_rpc_handler(move |args: AppendEntriesArgs| {
+        ep.add_rpc_handler(move |args: AppendEntriesArgs| {
             let this = this.clone();
             async move { this.append_entries(args).await.unwrap() }
         });
 
         let this = self.clone();
-        net.add_rpc_handler(move |args: InstallSnapshotArgs| {
+        ep.add_rpc_handler(move |args: InstallSnapshotArgs| {
             let this = this.clone();
             async move { this.install_snapshot(args).await.unwrap() }
         });
@@ -459,16 +462,16 @@ impl Raft {
             last_log_term: self.log.last().unwrap().term,
         };
         debug!("{:?} -> {:?}", self, args);
-        let net = net::NetLocalHandle::current();
+        let ep = self.ep.clone();
         let mut rpcs = self
             .peers
             .iter()
             .enumerate()
             .filter(|&(idx, _)| idx != self.me)
             .map(|(_, &peer)| {
-                let net = net.clone();
+                let ep = ep.clone();
                 let args = args.clone();
-                async move { net.call(peer, args).await }
+                async move { ep.call(peer, args).await }
             })
             .collect::<FuturesUnordered<_>>();
         let deadline = Instant::now() + Self::generate_election_timeout();
@@ -527,9 +530,9 @@ impl Raft {
             let this = self.this.clone();
             let state = self.state;
             let leader_id = self.me as u64;
+            let ep = self.ep.clone();
             self.tasks_of_state.push(madsim::task::spawn(async move {
                 let mut backoff = 1;
-                let net = net::NetLocalHandle::current();
                 loop {
                     enum Task {
                         AppendEntries(AppendEntriesArgs),
@@ -568,7 +571,7 @@ impl Raft {
                     };
                     match task {
                         Task::InstallSnapshot(args) => {
-                            let reply = match net
+                            let reply = match ep
                                 .call_timeout(peer, args, Self::generate_heartbeat_interval())
                                 .await
                             {
@@ -594,7 +597,7 @@ impl Raft {
                             continue;
                         }
                         Task::AppendEntries(args) => {
-                            let reply = match net
+                            let reply = match ep
                                 .call_timeout(peer, args, Self::generate_heartbeat_interval())
                                 .await
                             {

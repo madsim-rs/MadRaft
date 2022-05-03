@@ -2,7 +2,10 @@ use super::raft::*;
 use futures::StreamExt;
 use log::*;
 use madsim::{
+    fs::FsSim,
+    net::NetSim,
     rand::{self, Rng},
+    task::NodeId,
     time::{self, Instant},
     Handle,
 };
@@ -19,7 +22,10 @@ use std::{
 
 pub struct RaftTester {
     handle: Handle,
+    fs: Arc<FsSim>,
+    net: Arc<NetSim>,
     n: usize,
+    nodes: Vec<NodeId>,
     addrs: Vec<SocketAddr>,
     rafts: Mutex<Vec<Option<RaftHandle>>>,
     connected: Vec<AtomicBool>,
@@ -41,16 +47,29 @@ impl RaftTester {
 
     async fn new_ext(n: usize, snapshot: bool) -> Self {
         let handle = Handle::current();
+        let nodes = (0..n)
+            .map(|i| {
+                handle
+                    .create_node()
+                    .name(format!("raft-{i}"))
+                    .init(|| async move {})
+                    .build()
+                    .id()
+            })
+            .collect();
         let tester = RaftTester {
             n,
+            nodes,
             addrs: (0..n)
                 .map(|i| SocketAddr::from(([0, 0, 1, i as _], 0)))
-                .collect::<Vec<_>>(),
+                .collect(),
             rafts: Mutex::new(vec![None; n]),
             connected: (0..n).map(|_| AtomicBool::new(false)).collect(),
             storage: StorageHandle::new(n),
             t0: Instant::now(),
             handle,
+            fs: madsim::plugin::simulator(),
+            net: madsim::plugin::simulator(),
         };
         for i in 0..n {
             tester.start1_ext(i, snapshot).await;
@@ -125,7 +144,7 @@ impl RaftTester {
     ///
     /// Delay from 1ms to 27ms. Drop the packet with a probability of 10%.
     pub fn set_unreliable(&self, unreliable: bool) {
-        self.handle.net.update_config(|cfg| {
+        self.net.update_config(|cfg| {
             if unreliable {
                 cfg.packet_loss_rate = 0.1;
                 cfg.send_latency = Duration::from_millis(1)..Duration::from_millis(27);
@@ -145,14 +164,14 @@ impl RaftTester {
     }
 
     pub fn rpc_total(&self) -> u64 {
-        self.handle.net.stat().msg_count / 2
+        self.net.stat().msg_count / 2
     }
 
     /// Maximum log size across all servers
     pub fn log_size(&self) -> usize {
-        self.addrs
+        self.nodes
             .iter()
-            .map(|&addr| self.handle.fs.get_file_size(addr, "state").unwrap())
+            .map(|&id| self.fs.get_file_size(id, "state").unwrap())
             .max()
             .unwrap() as usize
     }
@@ -165,7 +184,7 @@ impl RaftTester {
     pub async fn start(&self, i: usize, cmd: Entry) -> Result<Start> {
         let raft = self.rafts.lock().unwrap()[i].as_ref().unwrap().clone();
         self.handle
-            .get_host(self.addrs[i])
+            .get_node(self.nodes[i])
             .unwrap()
             .spawn(async move { raft.start(&bincode::serialize(&cmd).unwrap()).await })
             .await
@@ -264,16 +283,16 @@ impl RaftTester {
 
     /// detach server i from the net.
     pub fn disconnect(&self, i: usize) {
-        debug!("disconnect({})", i);
+        debug!("disconnect({i})");
         self.connected[i].store(false, Ordering::SeqCst);
-        self.handle.net.disconnect(self.addrs[i]);
+        self.net.disconnect(self.nodes[i]);
     }
 
     /// attach server i to the net.
     pub fn connect(&self, i: usize) {
-        debug!("connect({})", i);
+        debug!("connect({i})");
         self.connected[i].store(true, Ordering::SeqCst);
-        self.handle.net.connect(self.addrs[i]);
+        self.net.connect(self.nodes[i]);
     }
 
     /// Is server i connected?
@@ -295,7 +314,7 @@ impl RaftTester {
         self.crash1(i);
 
         let addrs = self.addrs.clone();
-        let handle = self.handle.create_host(self.addrs[i]).unwrap();
+        let handle = self.handle.get_node(self.nodes[i]).unwrap();
         let (raft, mut apply_recver) = handle.spawn(RaftHandle::new(addrs, i)).await;
         self.rafts.lock().unwrap()[i] = Some(raft.clone());
 
@@ -328,8 +347,8 @@ impl RaftTester {
     }
 
     pub fn crash1(&self, i: usize) {
-        debug!("crash({})", i);
-        self.handle.kill(self.addrs[i]);
+        debug!("crash({i})");
+        self.handle.kill(self.nodes[i]);
         self.rafts.lock().unwrap()[i] = None;
     }
 
