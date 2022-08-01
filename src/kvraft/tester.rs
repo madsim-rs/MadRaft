@@ -1,4 +1,10 @@
-use madsim::{time::*, Handle, LocalHandle};
+use madsim::{
+    fs::FsSim,
+    net::NetSim,
+    runtime::{Handle, NodeHandle},
+    task::NodeId,
+    time::*,
+};
 use std::{
     net::SocketAddr,
     sync::atomic::{AtomicUsize, Ordering},
@@ -9,7 +15,10 @@ use super::{client, server};
 
 pub struct Tester {
     handle: Handle,
+    fs: Arc<FsSim>,
+    net: Arc<NetSim>,
     n: usize,
+    nodes: Vec<NodeId>,
     addrs: Vec<SocketAddr>,
     servers: Mutex<Vec<Option<Arc<server::KvServer>>>>,
     next_client_id: AtomicUsize,
@@ -26,27 +35,40 @@ pub struct Tester {
 impl Tester {
     pub async fn new(n: usize, unreliable: bool, maxraftstate: Option<usize>) -> Tester {
         let handle = Handle::current();
-        if unreliable {
-            handle.net.update_config(|cfg| {
-                cfg.packet_loss_rate = 0.1;
-                cfg.send_latency = Duration::from_millis(1)..Duration::from_millis(27);
-            });
-        }
         let mut servers = vec![];
         servers.resize_with(n, || None);
+        let nodes = (0..n)
+            .map(|i| {
+                handle
+                    .create_node()
+                    .name(format!("raft-{i}"))
+                    .init(|| async move {})
+                    .build()
+                    .id()
+            })
+            .collect();
         let mut tester = Tester {
             handle,
             n,
+            nodes,
             addrs: (0..n)
                 .map(|i| SocketAddr::from(([0, 0, 1, i as _], 0)))
-                .collect::<Vec<_>>(),
+                .collect(),
             servers: Mutex::new(servers),
             next_client_id: AtomicUsize::new(0),
             maxraftstate,
             t0: Instant::now(),
             rpcs0: 0,
             ops: Arc::new(AtomicUsize::new(0)),
+            fs: madsim::plugin::simulator(),
+            net: madsim::plugin::simulator(),
         };
+        if unreliable {
+            tester.net.update_config(|cfg| {
+                cfg.packet_loss_rate = 0.1;
+                cfg.send_latency = Duration::from_millis(1)..Duration::from_millis(27);
+            });
+        }
         tester.rpcs0 = tester.rpc_total();
         // create a full set of KV servers.
         for i in 0..n {
@@ -56,7 +78,7 @@ impl Tester {
     }
 
     fn rpc_total(&self) -> u64 {
-        self.handle.net.stat().msg_count / 2
+        self.net.stat().msg_count / 2
     }
 
     fn check_timeout(&self) {
@@ -68,18 +90,18 @@ impl Tester {
 
     /// Maximum log size across all servers
     pub fn log_size(&self) -> usize {
-        self.addrs
+        self.nodes
             .iter()
-            .map(|&addr| self.handle.fs.get_file_size(addr, "state").unwrap())
+            .map(|&id| self.fs.get_file_size(id, "state").unwrap())
             .max()
             .unwrap() as usize
     }
 
     /// Maximum snapshot size across all servers
     pub fn snapshot_size(&self) -> usize {
-        self.addrs
+        self.nodes
             .iter()
-            .map(|&addr| self.handle.fs.get_file_size(addr, "snapshot").unwrap())
+            .map(|&id| self.fs.get_file_size(id, "snapshot").unwrap())
             .max()
             .unwrap() as usize
     }
@@ -88,7 +110,7 @@ impl Tester {
     fn connect(&self, i: usize, to: &[usize]) {
         debug!("connect peer {} to {:?}", i, to);
         for &j in to {
-            self.handle.net.connect2(self.addrs[i], self.addrs[j]);
+            self.net.connect2(self.nodes[i], self.nodes[j]);
         }
     }
 
@@ -96,7 +118,7 @@ impl Tester {
     fn disconnect(&self, i: usize, from: &[usize]) {
         debug!("disconnect peer {} from {:?}", i, from);
         for &j in from {
-            self.handle.net.disconnect2(self.addrs[i], self.addrs[j]);
+            self.net.disconnect2(self.nodes[i], self.nodes[j]);
         }
     }
 
@@ -128,7 +150,7 @@ impl Tester {
     // now enable only connections to servers in to[].
     pub fn make_client(&self, to: &[usize]) -> Clerk {
         let id = ClerkId(self.next_client_id.fetch_add(1, Ordering::SeqCst));
-        let handle = self.handle.create_host(id.to_addr()).unwrap();
+        let handle = self.handle.create_node().build();
         self.connect_client(id, to);
         Clerk {
             id,
@@ -141,28 +163,28 @@ impl Tester {
     pub fn connect_client(&self, id: ClerkId, to: &[usize]) {
         debug!("connect {:?} to {:?}", id, to);
         let addr = id.to_addr();
-        self.handle.net.connect(addr);
+        self.net.connect(addr);
         for i in 0..self.n {
-            self.handle.net.disconnect2(addr, self.addrs[i]);
+            self.net.disconnect2(addr, self.nodes[i]);
         }
         for &i in to {
-            self.handle.net.connect2(addr, self.addrs[i]);
+            self.net.connect2(addr, self.nodes[i]);
         }
     }
 
     /// Shutdown a server.
     pub fn shutdown_server(&self, i: usize) {
-        debug!("shutdown_server({})", i);
-        self.handle.kill(self.addrs[i]);
+        debug!("shutdown_server({i})");
+        self.handle.kill(self.nodes[i]);
         self.servers.lock().unwrap()[i] = None;
     }
 
     /// Start a server.
     /// If restart servers, first call shutdown_server
     pub async fn start_server(&self, i: usize) {
-        debug!("start_server({})", i);
+        debug!("start_server({i})");
         let addrs = self.addrs.clone();
-        let handle = self.handle.create_host(self.addrs[i]).unwrap();
+        let handle = self.handle.create_node().build();
         let kv = handle
             .spawn(server::KvServer::new(addrs, i, self.maxraftstate))
             .await;
@@ -222,7 +244,7 @@ impl ClerkId {
 }
 
 pub struct Clerk {
-    handle: LocalHandle,
+    handle: NodeHandle,
     id: ClerkId,
     ck: Arc<client::Clerk>,
     ops: Arc<AtomicUsize>,
@@ -243,6 +265,7 @@ impl Clerk {
                 ck.put(key, value).await;
             })
             .await
+            .unwrap()
     }
 
     pub async fn append(&self, key: &str, value: &str) {
@@ -255,19 +278,28 @@ impl Clerk {
                 ck.append(key, value).await;
             })
             .await
+            .unwrap()
     }
 
     pub async fn get(&self, key: &str) -> String {
         self.op();
         let ck = self.ck.clone();
         let key = key.to_owned();
-        self.handle.spawn(async move { ck.get(key).await }).await
+
+        self.handle
+            .spawn(async move { ck.get(key).await })
+            .await
+            .unwrap()
     }
 
     pub async fn check(&self, key: &str, value: &str) {
         let ck = self.ck.clone();
         let key1 = key.to_owned();
-        let actual = self.handle.spawn(async move { ck.get(key1).await }).await;
+        let actual = self
+            .handle
+            .spawn(async move { ck.get(key1).await })
+            .await
+            .unwrap();
         assert_eq!(actual, value, "get({}) check failed", key);
     }
 

@@ -28,6 +28,8 @@ pub(super) struct WithId<R> {
 
 impl<R: Request> Request for WithId<R> {
     type Response = Result<R::Response, Error>;
+    // FIXME: different ID for different types?
+    const ID: u64 = 1;
 }
 
 pub struct Server<S: State> {
@@ -35,7 +37,7 @@ pub struct Server<S: State> {
     me: usize,
     rpcs: Arc<Rpcs<<S::Command as Request>::Response>>,
     state: Arc<Mutex<S>>,
-    _bg_task: task::Task<()>,
+    _bg_task: task::JoinHandle<()>,
 }
 
 impl<S: State> fmt::Debug for Server<S> {

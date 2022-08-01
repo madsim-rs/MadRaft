@@ -109,7 +109,7 @@ async fn generic_test(
             cas.push(task::spawn_local(async move {
                 // TODO: change the closure to a future.
                 let mut j = 0;
-                let mut rng = rand::rng();
+                let mut rng = rand::thread_rng();
                 let mut last = String::new();
                 let key = format!("{}", cli);
                 ck.put(&key, &last).await;
@@ -141,7 +141,7 @@ async fn generic_test(
             Some(task::spawn_local(async move {
                 let mut all = t.all();
                 let n = all.len();
-                let mut rng = rand::rng();
+                let mut rng = rand::thread_rng();
                 while !done.load(Ordering::Relaxed) {
                     all.shuffle(&mut rng);
                     let (left, right) = all.split_at(rng.gen_range(0..n));

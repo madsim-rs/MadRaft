@@ -38,7 +38,7 @@ impl Tester {
     pub async fn new(n: usize, unreliable: bool, max_raft_state: Option<usize>) -> Tester {
         let handle = Handle::current();
         if unreliable {
-            handle.net.update_config(|cfg| {
+            handle.net().update_config(|cfg| {
                 cfg.packet_loss_rate = 0.1;
                 cfg.send_latency = Duration::from_millis(1)..Duration::from_millis(27);
             });
@@ -50,7 +50,7 @@ impl Tester {
             .collect::<Vec<_>>();
         let mut ctrlers = vec![];
         for i in 0..n_ctrler {
-            let handle = handle.create_host(ctrler_addrs[i]).unwrap();
+            let handle = handle.create_host(ctrler_addrs[i]).build().unwrap();
             let ctrler = handle
                 .spawn(ShardCtrler::new(ctrler_addrs.clone(), i, max_raft_state))
                 .await;
@@ -91,8 +91,12 @@ impl Tester {
     pub fn check_logs(&self) {
         for group in self.groups.iter() {
             for &addr in group.addrs.iter() {
-                let state_size = self.handle.fs.get_file_size(addr, "state").unwrap_or(0);
-                let snap_size = self.handle.fs.get_file_size(addr, "snapshot").unwrap_or(0);
+                let state_size = self.handle.fs().get_file_size(addr, "state").unwrap_or(0);
+                let snap_size = self
+                    .handle
+                    .fs()
+                    .get_file_size(addr, "snapshot")
+                    .unwrap_or(0);
                 if let Some(limit) = self.max_raft_state {
                     assert!(
                         state_size as usize <= 8 * limit,
@@ -114,8 +118,8 @@ impl Tester {
         let mut size = 0;
         for group in self.groups.iter() {
             for &addr in group.addrs.iter() {
-                let state_size = self.handle.fs.get_file_size(addr, "state").unwrap();
-                let snap_size = self.handle.fs.get_file_size(addr, "snapshot").unwrap();
+                let state_size = self.handle.fs().get_file_size(addr, "state").unwrap();
+                let snap_size = self.handle.fs().get_file_size(addr, "snapshot").unwrap();
                 size += state_size + snap_size;
             }
         }
@@ -123,7 +127,7 @@ impl Tester {
     }
 
     fn rpc_total(&self) -> u64 {
-        self.handle.net.stat().msg_count / 2
+        self.handle.net().stat().msg_count / 2
     }
 
     // Create a clerk with clerk specific server names.
@@ -137,7 +141,7 @@ impl Tester {
         debug!("start_server({}, {})", group, i);
         let group = &self.groups[group];
         let addrs = group.addrs.clone();
-        let handle = self.handle.create_host(group.addrs[i]).unwrap();
+        let handle = self.handle.create_host(group.addrs[i]).build().unwrap();
         let ctrl_ck = CtrlerClerk::new(self.ctrler_addrs.clone());
         let kv = handle
             .spawn(ShardKvServer::new(
@@ -262,7 +266,7 @@ impl Clerk {
 }
 
 pub fn rand_string(len: usize) -> String {
-    rand::rng()
+    rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(len)
         .map(char::from)

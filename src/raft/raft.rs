@@ -4,7 +4,7 @@ use madsim::{
     fs::{self, File},
     net::Endpoint,
     rand::{self, Rng},
-    task::Task,
+    task::JoinHandle,
     time::{self, *},
 };
 use serde::{Deserialize, Serialize};
@@ -76,7 +76,7 @@ struct Raft {
 
     /// Tasks of current state.
     /// On state change, drop these tasks to cancel them.
-    tasks_of_state: Vec<Task<()>>,
+    tasks_of_state: Vec<JoinHandle<()>>,
 
     state: State,
     // State Persistent state on all servers
@@ -691,7 +691,7 @@ impl Raft {
     }
 
     fn generate_election_timeout() -> Duration {
-        Duration::from_millis(rand::rng().gen_range(150..300))
+        Duration::from_millis(rand::thread_rng().gen_range(150..300))
     }
 
     fn generate_heartbeat_interval() -> Duration {

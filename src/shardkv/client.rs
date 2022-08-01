@@ -28,12 +28,12 @@ impl Clerk {
     }
 
     pub async fn put(&self, key: String, value: String) {
-        let id: u64 = rand::rng().gen();
+        let id: u64 = rand::thread_rng().gen();
         self.call(Op::Put { id, key, value }).await;
     }
 
     pub async fn append(&self, key: String, value: String) {
-        let id: u64 = rand::rng().gen();
+        let id: u64 = rand::thread_rng().gen();
         self.call(Op::Append { id, key, value }).await;
     }
 

@@ -5,9 +5,9 @@ use madsim::{
     fs::FsSim,
     net::NetSim,
     rand::{self, Rng},
+    runtime::Handle,
     task::NodeId,
     time::{self, Instant},
-    Handle,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -52,7 +52,7 @@ impl RaftTester {
                 handle
                     .create_node()
                     .name(format!("raft-{i}"))
-                    .init(|| async move {})
+                    .ip([0, 0, 1, i as _].into())
                     .build()
                     .id()
             })
@@ -82,7 +82,7 @@ impl RaftTester {
     /// Try a few times in case re-elections are needed.
     pub async fn check_one_leader(&self) -> usize {
         debug!("check_one_leader");
-        let mut random = rand::rng();
+        let mut random = rand::thread_rng();
         let mut leaders = HashMap::<u64, Vec<usize>>::new();
         for _iters in 0..10 {
             time::sleep(Duration::from_millis(random.gen_range(450..550))).await;
@@ -188,6 +188,7 @@ impl RaftTester {
             .unwrap()
             .spawn(async move { raft.start(&bincode::serialize(&cmd).unwrap()).await })
             .await
+            .unwrap()
     }
 
     /// wait for at least n servers to commit.
@@ -315,12 +316,12 @@ impl RaftTester {
 
         let addrs = self.addrs.clone();
         let handle = self.handle.get_node(self.nodes[i]).unwrap();
-        let (raft, mut apply_recver) = handle.spawn(RaftHandle::new(addrs, i)).await;
+        let (raft, mut apply_recver) = handle.spawn(RaftHandle::new(addrs, i)).await.unwrap();
         self.rafts.lock().unwrap()[i] = Some(raft.clone());
 
         // listen to messages from Raft indicating newly committed messages.
         let storage = self.storage.clone();
-        let task = handle.spawn(async move {
+        handle.spawn(async move {
             while let Some(cmd) = apply_recver.next().await {
                 match cmd {
                     ApplyMsg::Command { data, index } => {
@@ -343,7 +344,6 @@ impl RaftTester {
                 }
             }
         });
-        task.detach();
     }
 
     pub fn crash1(&self, i: usize) {

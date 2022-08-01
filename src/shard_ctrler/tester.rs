@@ -21,7 +21,7 @@ impl Tester {
     pub async fn new(n: usize, unreliable: bool) -> Tester {
         let handle = Handle::current();
         if unreliable {
-            handle.net.update_config(|cfg| {
+            handle.net().update_config(|cfg| {
                 cfg.packet_loss_rate = 0.1;
                 cfg.send_latency = Duration::from_millis(1)..Duration::from_millis(27);
             });
@@ -45,7 +45,7 @@ impl Tester {
     }
 
     fn rpc_total(&self) -> u64 {
-        self.handle.net.stat().msg_count / 2
+        self.handle.net().stat().msg_count / 2
     }
 
     fn check_timeout(&self) {
@@ -74,7 +74,7 @@ impl Tester {
     pub async fn start_server(&self, i: usize) {
         debug!("start_server({})", i);
         let addrs = self.addrs.clone();
-        let handle = self.handle.create_host(self.addrs[i]).unwrap();
+        let handle = self.handle.create_host(self.addrs[i]).build().unwrap();
         let kv = handle.spawn(ShardCtrler::new(addrs, i, None)).await;
         self.servers.lock().unwrap()[i] = Some(kv);
     }

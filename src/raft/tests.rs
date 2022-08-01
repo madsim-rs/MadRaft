@@ -87,7 +87,7 @@ async fn many_election_2a() {
 
     t.check_one_leader().await;
 
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     for _ in 0..iters {
         // disconnect three nodes
         let i1 = random.gen_range(0..servers);
@@ -319,7 +319,7 @@ async fn backup_2b() {
 
     info!("Test (2B): leader backs up quickly over incorrect follower logs");
 
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     t.one(random.gen_entry(), servers, true).await;
 
     // put leader and one follower in a partition
@@ -402,7 +402,7 @@ async fn count_2b() {
 
     let mut total2 = 0;
     let mut success = false;
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     'outer: for tried in 0..5 {
         if tried > 0 {
             // give solution some time to settle
@@ -616,7 +616,7 @@ async fn figure_8_2c() {
 
     info!("Test (2C): Figure 8");
 
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     t.one(random.gen_entry(), 1, true).await;
 
     let mut nup = servers;
@@ -692,7 +692,7 @@ async fn figure_8_unreliable_2c() {
     t.set_unreliable(true);
     info!("Test (2C): Figure 8 (unreliable)");
 
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     t.one(random.gen_entry(), 1, true).await;
 
     let mut nup = servers;
@@ -762,7 +762,7 @@ async fn internal_churn(unreliable: bool) {
     // create concurrent clients
     async fn cfn(servers: usize, me: usize, stop: Arc<AtomicBool>, t: Arc<RaftTester>) -> Vec<u64> {
         let mut values = vec![];
-        let mut random = rand::rng();
+        let mut random = rand::thread_rng();
         while !stop.load(Ordering::SeqCst) {
             let x = random.gen_entry();
             let mut index = None;
@@ -801,7 +801,7 @@ async fn internal_churn(unreliable: bool) {
     for i in 0..ncli {
         nrec.push(task::spawn_local(cfn(servers, i, stop.clone(), t.clone())));
     }
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     for _iters in 0..20 {
         if random.gen_bool(0.2) {
             let i = random.gen_range(0..servers);
@@ -848,8 +848,10 @@ async fn internal_churn(unreliable: bool) {
         let v = t.wait(index, servers, None).await.unwrap();
         really.push(v.x);
     }
-    for v1 in future::join_all(nrec).await.iter().flatten() {
-        assert!(really.contains(v1), "didn't find a value");
+    for handle in nrec {
+        for v1 in handle.await.unwrap() {
+            assert!(really.contains(&v1), "didn't find a value");
+        }
     }
 
     t.end();
@@ -863,7 +865,7 @@ async fn snap_common(disconnect: bool, reliable: bool, crash: bool) {
     let t = RaftTester::new_with_snapshot(servers).await;
     t.set_unreliable(!reliable);
 
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     t.one(random.gen_entry(), servers, true).await;
     let mut leader1 = t.check_one_leader().await;
 

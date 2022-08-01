@@ -8,8 +8,7 @@ description = "The labs of Raft consensus algorithm on MadSim."
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-madsim = { git = "https://github.com/madsys-dev/madsim.git", rev = "daa56e2", features = ["sim"] }
-# madsim = { path = "../madsim/madsim", features = ["sim"] }
+madsim = "=0.2.0-alpha.6"
 log = "0.4"
 rand = "0.8"
 futures = "0.3"

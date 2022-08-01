@@ -1,7 +1,7 @@
 use super::{msg::*, server::WithId};
 use madsim::{
     net::{self, rpc::Request},
-    rand::{self, Rng},
+    rand,
     time::*,
 };
 use std::{
@@ -57,7 +57,7 @@ where
     }
 
     pub async fn call(&self, args: Req) -> Req::Response {
-        let id: u64 = rand::rng().gen();
+        let id: u64 = rand::random();
         let net = net::NetLocalHandle::current();
         let mut i = self.leader.load(Ordering::Relaxed);
         loop {

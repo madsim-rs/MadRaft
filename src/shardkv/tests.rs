@@ -334,7 +334,7 @@ async fn concurrent3_4b() {
 
     let kvs_fut = t.spawn_concurrent_append(kvs, 1, 0);
 
-    let mut random = rand::rng();
+    let mut random = rand::thread_rng();
     let t0 = Instant::now();
     while t0.elapsed() < Duration::from_secs(12) {
         t.join(1).await;
