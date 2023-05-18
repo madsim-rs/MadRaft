@@ -13,13 +13,6 @@ use std::{
     time::Duration,
 };
 
-fn rand_string<R: Rng>(rng: &mut R, len: usize) -> String {
-    (0..len)
-        .into_iter()
-        .map(|_| rng.gen_range('a'..'z'))
-        .collect()
-}
-
 /// The tester generously allows solutions to complete elections in one second
 /// (much more than the paper's range of timeouts).
 const RAFT_ELECTION_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -145,23 +138,22 @@ async fn rpc_bytes_2b() {
 
     let t = RaftTester::new(servers).await;
     info!("Test (2B): RPC byte count");
-    let mut random = rand::rng();
 
     t.one(Entry::X(99), servers, false).await;
-    let bytes0 = 0; // TODO bytes metrics
+    let rpc0 = t.rpc_total();
 
     let iters = 10;
     let mut sent = 0;
     for index in 2..(iters + 2) {
-        let cmd = rand_string(&mut random, 5000);
+        let cmd = rand_string(5000);
         let xindex = t.one(Entry::Str(cmd), servers, false).await;
         assert_eq!(xindex, index, "got index {} but expected {}", xindex, index);
         sent += 5000;
     }
 
-    let bytes1 = 100;
-    let got = bytes1 - bytes0;
-    let expected = servers * sent;
+    let rpc1 = t.rpc_total();
+    let got = (rpc1 - rpc0) * 5000;
+    let expected = (servers * sent) as u64;
     assert!(
         got <= expected + 50000,
         "too many RPC bytes; got {}, expected {}",
