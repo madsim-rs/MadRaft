@@ -1,5 +1,7 @@
 //! History model.
 
+use std::fmt::Debug;
+
 /// Operation
 #[derive(Debug, Clone)]
 pub(crate) struct Operation<M: Model> {
@@ -16,8 +18,10 @@ pub(crate) struct Operation<M: Model> {
 }
 
 /// Entry type, could be call or return.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) enum EntryValue<In, Out> {
+    #[default] // only used in sentinel node
+    Null,
     Call(In),
     Return(Out),
 }
@@ -35,12 +39,12 @@ pub(crate) struct Entry<M: Model> {
 /// Model.
 ///
 /// - Eq trait needs to be implemented to represent equality on states.
-pub(crate) trait Model: Eq + Clone {
+pub(crate) trait Model: Eq + Clone + Debug {
     /// Input type
-    type In: Clone;
+    type In: Clone + Debug;
 
     /// Output type
-    type Out: Clone;
+    type Out: Clone + Debug;
 
     /// Partition operations, such that a history is linearizable if and only if
     /// each partition is linearizable.

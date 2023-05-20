@@ -436,7 +436,7 @@ async fn unreliable3_4b() {
     info!("Test: unreliable 3...\n");
 
     let t = Tester::new(3, true, Some(100)).await;
-    let begin = Instant::now();
+    let _begin = Instant::now();
     let operations = Arc::new(Mutex::new(Vec::<Operation<KvModel>>::new()));
 
     let ck = t.make_client();
@@ -463,7 +463,7 @@ async fn unreliable3_4b() {
     t.join(0).await;
 
     time::sleep(Duration::from_secs(2)).await;
-    let kvs = kvs_fut.await;
+    let _kvs = kvs_fut.await;
 
     let history = operations.lock().unwrap().clone();
     let (res, _info) =

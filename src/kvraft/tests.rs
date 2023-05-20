@@ -242,10 +242,11 @@ async fn generic_test(
         }
     }
 
-    // TODO linearizable check
-    let (res, _info) =
-        porcupine::check_operation_verbose::<KvModel>(op_log.read(), LINEARIZABILITY_CHECK_TIMEOUT)
-            .await;
+    let res = porcupine::check_operations_timeout::<KvModel>(
+        op_log.read(),
+        LINEARIZABILITY_CHECK_TIMEOUT,
+    )
+    .await;
     assert!(
         !matches!(res, CheckResult::Illegal),
         "history is not linearizable"
