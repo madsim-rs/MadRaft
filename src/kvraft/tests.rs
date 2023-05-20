@@ -1,3 +1,8 @@
+use crate::{
+    kvraft::tester::OpLog,
+    porcupine::{self, kv::KvModel, CheckResult},
+};
+
 use super::tester::Tester;
 use futures::{future, select, FutureExt};
 use madsim::{
@@ -14,7 +19,7 @@ use std::sync::{
 /// (much more than the paper's range of timeouts).
 const RAFT_ELECTION_TIMEOUT: Duration = Duration::from_millis(1000);
 
-// const LINEARIZABILITY_CHECK_TIMEOUT: Duration = Duration::from_millis(1000);
+const LINEARIZABILITY_CHECK_TIMEOUT: Duration = Duration::from_millis(1000);
 
 // check that for a specific client all known appends are present in a value,
 // and in order
@@ -99,6 +104,7 @@ async fn generic_test(
     info!("{} ({})", title, part);
 
     let t = Arc::new(Tester::new(nservers, unreliable, maxraftstate).await);
+    let op_log = Arc::new(OpLog::new());
 
     let ck = t.make_client(&t.all());
 
@@ -110,6 +116,7 @@ async fn generic_test(
         for cli in 0..nclients {
             let ck = t.make_client(&t.all());
             let done = done.clone();
+            let log = Arc::clone(&op_log);
             cas.push(task::spawn_local(async move {
                 // TODO: change the closure to a future.
                 let mut j = 0;
@@ -117,7 +124,7 @@ async fn generic_test(
                 let mut last = String::new(); // only used when not randomkeys
                 let mut key = format!("{}", cli);
                 if !randomkeys {
-                    ck.put(&key, &last).await;
+                    ck.put_and_log(&key, &last, &log).await;
                 }
                 while !done.load(Ordering::Relaxed) {
                     if randomkeys {
@@ -127,7 +134,7 @@ async fn generic_test(
                     if rng.gen_bool(0.5) {
                         debug!("{}: client new append {:?}", cli, nv);
                         // predict effect of append(k, val) if old value is prev.
-                        ck.append(&key, &nv).await;
+                        ck.append_and_log(&key, &nv, &log).await;
                         if !randomkeys {
                             last += &nv;
                         }
@@ -135,10 +142,10 @@ async fn generic_test(
                     } else if randomkeys && rng.gen_bool(0.1) {
                         // we only do this when using random keys, because it would break the
                         // check done after Get() operations.
-                        ck.put(&key, &nv).await;
+                        ck.put_and_log(&key, &nv, &log).await;
                     } else {
                         debug!("{}: client new get {:?}", cli, key);
-                        let v = ck.get(&key).await;
+                        let v = ck.get_and_log(&key, &log).await;
                         if !randomkeys {
                             assert_eq!(v, last, "get wrong value, key {:?}", key);
                         }
@@ -217,7 +224,7 @@ async fn generic_test(
             }
             let key = format!("{}", i);
             debug!("Check {:?} for client {}", j, i);
-            let v = ck.get(&key).await;
+            let v = ck.get_and_log(&key, &op_log).await;
             if !randomkeys {
                 check_clnt_appends(i, &v, j);
             }
@@ -236,6 +243,16 @@ async fn generic_test(
     }
 
     // TODO linearizable check
+    let (res, _info) =
+        porcupine::check_operation_verbose::<KvModel>(op_log.read(), LINEARIZABILITY_CHECK_TIMEOUT)
+            .await;
+    assert!(
+        !matches!(res, CheckResult::Illegal),
+        "history is not linearizable"
+    );
+    if matches!(res, CheckResult::Unknown) {
+        warn!("linearizability check timed out, assuming history is ok");
+    }
 
     t.end();
 }

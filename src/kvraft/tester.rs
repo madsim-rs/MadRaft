@@ -1,3 +1,8 @@
+use crate::porcupine::{
+    kv::{KvInput, KvModel, KvOp, KvOutput},
+    model::Operation,
+};
+use lazy_static::lazy_static;
 use madsim::{time::*, Handle, LocalHandle};
 use std::{
     net::SocketAddr,
@@ -211,6 +216,29 @@ impl Tester {
     }
 }
 
+lazy_static! {
+    static ref T0: Instant = Instant::now();
+}
+
+#[derive(Debug)]
+pub struct OpLog {
+    operations: Mutex<Vec<Operation<KvModel>>>,
+}
+
+impl OpLog {
+    pub(super) fn new() -> Self {
+        Self {
+            operations: Mutex::new(Vec::new()),
+        }
+    }
+    fn append(&self, op: Operation<KvModel>) {
+        self.operations.lock().unwrap().push(op);
+    }
+    pub(super) fn read(&self) -> Vec<Operation<KvModel>> {
+        self.operations.lock().unwrap().clone()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClerkId(usize);
 
@@ -239,9 +267,28 @@ impl Clerk {
         let value = value.to_owned();
         self.handle
             .spawn(async move {
-                ck.put(key, value).await;
+                ck.put(key.clone(), value.clone()).await;
             })
             .await
+    }
+
+    pub async fn put_and_log(&self, key: &str, value: &str, log: &Arc<OpLog>) {
+        let start = T0.elapsed().as_micros();
+        self.put(key, value).await;
+        let end = T0.elapsed().as_micros();
+        log.append(Operation {
+            client_id: Some(self.id.0),
+            input: KvInput {
+                op: KvOp::Put,
+                key: key.to_owned(),
+                value: value.to_owned(),
+            },
+            call: start,
+            output: KvOutput {
+                value: "".to_string(),
+            },
+            ret: end,
+        });
     }
 
     pub async fn append(&self, key: &str, value: &str) {
@@ -251,9 +298,28 @@ impl Clerk {
         let value = value.to_owned();
         self.handle
             .spawn(async move {
-                ck.append(key, value).await;
+                ck.append(key.clone(), value.clone()).await;
             })
             .await
+    }
+
+    pub async fn append_and_log(&self, key: &str, value: &str, log: &Arc<OpLog>) {
+        let start = T0.elapsed().as_micros();
+        self.append(key, value).await;
+        let end = T0.elapsed().as_micros();
+        log.append(Operation {
+            client_id: Some(self.id.0),
+            input: KvInput {
+                op: KvOp::Append,
+                key: key.to_owned(),
+                value: value.to_owned(),
+            },
+            call: start,
+            output: KvOutput {
+                value: "".to_string(),
+            },
+            ret: end,
+        });
     }
 
     pub async fn get(&self, key: &str) -> String {
@@ -261,6 +327,26 @@ impl Clerk {
         let ck = self.ck.clone();
         let key = key.to_owned();
         self.handle.spawn(async move { ck.get(key).await }).await
+    }
+
+    pub async fn get_and_log(&self, key: &str, log: &Arc<OpLog>) -> String {
+        let start = T0.elapsed().as_micros();
+        let value = self.get(key).await;
+        let end = T0.elapsed().as_micros();
+        log.append(Operation {
+            client_id: Some(self.id.0),
+            input: KvInput {
+                op: KvOp::Get,
+                key: key.to_owned(),
+                value: "".to_string(),
+            },
+            call: start,
+            output: KvOutput {
+                value: value.to_owned(),
+            },
+            ret: end,
+        });
+        value
     }
 
     pub async fn check(&self, key: &str, value: &str) {

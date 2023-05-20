@@ -1,32 +1,53 @@
 //! History model.
 
 /// Operation
-pub(crate) struct Operation<In, Out> {
+#[derive(Debug, Clone)]
+pub(crate) struct Operation<M: Model> {
     /// optional, unless you want a visualization
     pub client_id: Option<usize>,
-    pub input: In,
+    /// input value
+    pub input: M::In,
     /// invocation time
-    pub call: u64,
-    pub output: Out,
+    pub call: u128,
+    /// output value
+    pub output: M::Out,
     /// response time
-    pub ret: u64,
+    pub ret: u128,
+}
+
+/// Entry type, could be call or return.
+#[derive(Debug)]
+pub(crate) enum EntryValue<In, Out> {
+    Call(In),
+    Return(Out),
+}
+
+/// Entry
+#[derive(Debug)]
+pub(crate) struct Entry<M: Model> {
+    pub value: EntryValue<M::In, M::Out>,
+    pub id: usize,
+    pub time: u128,
+    #[allow(dead_code)] // used in verbose mode
+    pub client_id: Option<usize>,
 }
 
 /// Model.
 ///
 /// - Eq trait needs to be implemented to represent equality on states.
-pub(crate) trait Model {
+pub(crate) trait Model: Eq + Clone {
     /// Input type
-    type In;
+    type In: Clone;
 
     /// Output type
-    type Out;
+    type Out: Clone;
 
     /// Partition operations, such that a history is linearizable if and only if
-    /// each partition is linearzable.
-    fn partition(
-        history: Vec<Operation<Self::In, Self::Out>>,
-    ) -> Vec<Vec<Operation<Self::In, Self::Out>>>;
+    /// each partition is linearizable.
+    ///
+    /// Each partition should be sorted by time. If two entries are of the same time,
+    /// calls should always be placed before returns.
+    fn partition(history: Vec<Operation<Self>>) -> Vec<Vec<Entry<Self>>>;
 
     /// Initial state of the system.
     fn init() -> Self;
@@ -34,9 +55,7 @@ pub(crate) trait Model {
     /// Step functions for the system.
     ///
     /// Returns whether or not the system could take this step with the given
-    /// inputs and outputs.
-    fn step(self, input: Self::In, output: Self::Out) -> (bool, Self);
-
-    /// Equality on states.
-    fn equal(&self, other: &Self) -> bool;
+    /// inputs and outputs, and the new state. This should not mutate the
+    /// existing state.
+    fn step(&self, input: &Self::In, output: &Self::Out) -> (bool, Self);
 }

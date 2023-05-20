@@ -1,6 +1,7 @@
 //! A key-value model.
 
-use crate::porcupine::model::{Model, Operation};
+use crate::porcupine::model::{Entry, EntryValue, Model, Operation};
+use std::{cmp::Ordering, collections::HashMap};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum KvOp {
@@ -9,18 +10,23 @@ pub(crate) enum KvOp {
     Append,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct KvInput {
-    op: KvOp,
-    key: String,
-    value: String,
+    pub(crate) op: KvOp,
+    pub(crate) key: String,
+    pub(crate) value: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct KvOutput {
-    value: String,
+    pub(crate) value: String,
 }
 
+/// Model for single-version key-value store.
+///
+/// A single instance of `KvModel` indicates the state of a single entry
+/// in the KV store.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KvModel {
     state: String,
 }
@@ -29,10 +35,49 @@ impl Model for KvModel {
     type In = KvInput;
     type Out = KvOutput;
 
-    fn partition(
-        history: Vec<Operation<KvInput, KvOutput>>,
-    ) -> Vec<Vec<Operation<KvInput, KvOutput>>> {
-        todo!("partition by key")
+    // partition the history by key, and then sort by time
+    fn partition(history: Vec<Operation<Self>>) -> Vec<Vec<Entry<Self>>> {
+        // key -> history of a single key
+        let mut map = HashMap::<String, (usize, Vec<Entry<Self>>)>::new();
+
+        for op in history {
+            let key = op.input.key.clone();
+            let (id, key_hist) = map.entry(key).or_default();
+
+            // turn operation into a call entry and a return entry
+            let call_entry = Entry {
+                value: EntryValue::Call::<KvInput, KvOutput>(op.input),
+                id: *id,
+                time: op.call,
+                client_id: op.client_id,
+            };
+            let return_entry = Entry {
+                value: EntryValue::Return::<KvInput, KvOutput>(op.output),
+                id: *id,
+                time: op.ret,
+                client_id: op.client_id,
+            };
+
+            *id += 1;
+            key_hist.push(call_entry);
+            key_hist.push(return_entry);
+        }
+
+        map.into_values()
+            .map(|(_, mut v)| {
+                // sort by time and then entry type
+                v.sort_by(|x, y| {
+                    x.time.cmp(&y.time).then_with(|| {
+                        if matches!(x.value, EntryValue::Call(_)) {
+                            Ordering::Less
+                        } else {
+                            Ordering::Greater
+                        }
+                    })
+                });
+                v
+            })
+            .collect()
     }
 
     fn init() -> Self {
@@ -41,20 +86,21 @@ impl Model for KvModel {
         }
     }
 
-    fn step(self, input: KvInput, output: KvOutput) -> (bool, Self) {
+    fn step(&self, input: &KvInput, output: &KvOutput) -> (bool, Self) {
         match input.op {
-            KvOp::Get => (output.value == self.state, self),
-            KvOp::Put => (true, Self { state: input.value }),
+            KvOp::Get => (output.value == self.state, self.to_owned()),
+            KvOp::Put => (
+                true,
+                Self {
+                    state: input.value.clone(),
+                },
+            ),
             KvOp::Append => (
                 true,
                 Self {
-                    state: self.state + input.value.as_str(),
+                    state: self.state.to_owned() + input.value.as_str(),
                 },
             ),
         }
-    }
-
-    fn equal(&self, other: &Self) -> bool {
-        self.state == other.state
     }
 }

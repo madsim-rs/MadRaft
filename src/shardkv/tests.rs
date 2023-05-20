@@ -1,3 +1,5 @@
+use crate::porcupine::{check_operation_verbose, kv::KvModel, model::Operation, CheckResult};
+
 use super::tester::*;
 use futures::future;
 use log::*;
@@ -10,9 +12,11 @@ use std::{
     future::Future,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
+
+const LINEARIZABILITY_CHECK_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// test static 2-way sharding, without shard movement.
 #[madsim::test]
@@ -429,7 +433,50 @@ async fn unreliable2_4b() {
 #[ignore]
 #[madsim::test]
 async fn unreliable3_4b() {
-    // TODO: linearizable
+    info!("Test: unreliable 3...\n");
+
+    let t = Tester::new(3, true, Some(100)).await;
+    let begin = Instant::now();
+    let operations = Arc::new(Mutex::new(Vec::<Operation<KvModel>>::new()));
+
+    let ck = t.make_client();
+    t.join(0).await;
+
+    let n = 10;
+    let kvs = (0..n)
+        .map(|i| (i.to_string(), rand_string(5)))
+        .collect::<Vec<_>>();
+    ck.put_kvs(&kvs).await; // TODO with log
+
+    let kvs_fut = t.spawn_concurrent_append(kvs, 5, 0); // TODO with log
+
+    time::sleep(Duration::from_millis(150)).await;
+    t.join(1).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.join(2).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.leave(0).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.leave(1).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.join(1).await;
+    t.join(0).await;
+
+    time::sleep(Duration::from_secs(2)).await;
+    let kvs = kvs_fut.await;
+
+    let history = operations.lock().unwrap().clone();
+    let (res, _info) =
+        check_operation_verbose::<KvModel>(history, LINEARIZABILITY_CHECK_TIMEOUT).await;
+    assert!(
+        !matches!(res, CheckResult::Illegal),
+        "history is not linearizable"
+    );
+    if matches!(res, CheckResult::Unknown) {
+        warn!("linearizability check timed out, assuming history is ok");
+    }
+
+    t.end();
 }
 
 /// optional test to see whether servers are deleting
