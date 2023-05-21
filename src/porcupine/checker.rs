@@ -16,7 +16,7 @@ fn cache_contains<M: Model>(cache: &HashMap<BitVec, Vec<M>>, bv: &BitVec, m: &M)
     if let Some(entries) = cache.get(bv) {
         return entries.contains(m);
     }
-    return false;
+    false
 }
 
 struct CallEntry<M: Model> {

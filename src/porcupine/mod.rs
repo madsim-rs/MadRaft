@@ -36,5 +36,6 @@ pub(crate) async fn check_operation_verbose<M: Model>(
     history: Vec<Operation<M>>,
     timeout: Duration,
 ) -> (CheckResult, LinearizationInfo) {
+    // TODO support verbose
     checker::check_operations::<M>(history, true, Some(timeout)).await
 }

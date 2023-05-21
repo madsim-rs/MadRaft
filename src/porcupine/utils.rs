@@ -34,6 +34,7 @@ impl<In, Out> EntryNode<In, Out> {
             _ => panic!("type mismatch"),
         }
     }
+
     pub(super) fn unwrap_out(&self) -> &Out {
         match &self.value {
             EntryValue::Return(v) => v,

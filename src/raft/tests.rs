@@ -152,6 +152,7 @@ async fn rpc_bytes_2b() {
     }
 
     let rpc1 = t.rpc_total();
+    // XXX should count bytes instead, but madsim does not provide such functionality
     let got = (rpc1 - rpc0) * 5000;
     let expected = (servers * sent) as u64;
     assert!(

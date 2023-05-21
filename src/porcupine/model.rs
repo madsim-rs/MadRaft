@@ -20,8 +20,8 @@ pub(crate) struct Operation<M: Model> {
 /// Entry type, could be call or return.
 #[derive(Debug, Default)]
 pub(crate) enum EntryValue<In, Out> {
-    #[default] // only used in sentinel node
-    Null,
+    #[default]
+    Null, // only used in sentinel node
     Call(In),
     Return(Out),
 }

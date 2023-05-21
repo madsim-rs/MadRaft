@@ -1,5 +1,11 @@
 use super::{client::Clerk, server::ShardKvServer};
-use crate::shard_ctrler::{client::Clerk as CtrlerClerk, server::ShardCtrler, N_SHARDS};
+use crate::{
+    porcupine::{
+        kv::{KvInput, KvModel, KvOp, KvOutput},
+        model::Operation,
+    },
+    shard_ctrler::{client::Clerk as CtrlerClerk, server::ShardCtrler, N_SHARDS},
+};
 use ::rand::distributions::Alphanumeric;
 use madsim::{
     rand::{self, Rng},
@@ -25,7 +31,7 @@ pub struct Tester {
     max_raft_state: Option<usize>,
 
     // begin()/end() statistics
-    t0: Instant,
+    pub t0: Instant,
 }
 
 struct Group {
@@ -235,6 +241,34 @@ impl Clerk {
     pub async fn put_kvs(&self, kvs: &[(String, String)]) {
         for (k, v) in kvs {
             self.put(k.clone(), v.clone()).await;
+        }
+    }
+
+    pub(super) async fn put_kvs_with_log(
+        &self,
+        begin: Instant,
+        kvs: &[(String, String)],
+        log: &Arc<Mutex<Vec<Operation<KvModel>>>>,
+    ) {
+        for (k, v) in kvs {
+            let start = begin.elapsed().as_micros();
+            self.put(k.clone(), v.clone()).await;
+            let end = begin.elapsed().as_micros();
+            let input = KvInput {
+                op: KvOp::Put,
+                key: k.to_owned(),
+                value: v.to_owned(),
+            };
+            let output = KvOutput {
+                value: "".to_string(),
+            };
+            log.lock().unwrap().push(Operation {
+                client_id: None,
+                input,
+                call: start,
+                output,
+                ret: end,
+            });
         }
     }
 
