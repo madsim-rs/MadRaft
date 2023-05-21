@@ -7,8 +7,16 @@ use crate::porcupine::{
 };
 use bit_vec::BitVec;
 use futures::{stream::FuturesUnordered, StreamExt};
-use madsim::time;
-use std::{collections::HashMap, mem, time::Duration};
+use std::{
+    collections::HashMap,
+    mem,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
 
 pub(crate) struct LinearizationInfo {}
 
@@ -26,7 +34,11 @@ struct CallEntry<M: Model> {
 }
 
 /// Check single sub-history. Return Some() if it's linearizable.
-fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Option<()> {
+fn check_single<M: Model>(
+    history: Vec<Entry<M>>,
+    _verbose: bool,
+    killed: Arc<AtomicBool>,
+) -> CheckResult {
     let n = history.len() / 2; // number of operations
     debug!("history {:?}", history);
 
@@ -40,6 +52,9 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Option<()> 
     let mut state = M::init();
 
     while !undecided.is_empty() {
+        if killed.load(Ordering::Relaxed) {
+            return CheckResult::Unknown;
+        }
         if matches!(entry.value, EntryValue::Call(_)) {
             debug!("id={} call", entry.id);
             // the matched return entry
@@ -78,21 +93,24 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Option<()> 
             // an undecided return found, meaning that a call considered done before this
             // time point has to be revoked.
             debug!("id={} return", entry.id);
+            if calls.is_empty() {
+                return CheckResult::Illegal;
+            }
             let CallEntry {
                 mut call,
                 ret,
                 state: state0,
-            } = calls.pop()?;
+            } = calls.pop().unwrap();
             debug!("revoke call {}", call.id);
             state = state0;
             linearized.set(call.id as _, false);
-            entry = call.leak();
+            entry = call.ref_mut();
             call.unlift(ret);
             // call entry has next
             entry = entry.next_mut().unwrap();
         }
     }
-    Some(())
+    CheckResult::Ok
 }
 
 /// Check history in parallel.
@@ -101,21 +119,25 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Option<()> 
 async fn check_parallel<M: Model>(
     histories: Vec<Vec<Entry<M>>>,
     verbose: bool,
+    killed: Arc<AtomicBool>,
 ) -> (CheckResult, LinearizationInfo) {
     let mut futures: FuturesUnordered<_> = histories
         .into_iter()
-        .map(|subhistory| async move { check_single::<M>(subhistory, verbose) })
+        .map(|subhistory| {
+            let killed = killed.clone();
+            async move { check_single::<M>(subhistory, verbose, killed) }
+        })
         .collect();
     let mut check_result = CheckResult::Ok;
     while let Some(res) = futures.next().await {
-        if res.is_none() {
-            check_result = CheckResult::Illegal;
-            if !verbose {
+        if res as u8 > check_result as u8 {
+            check_result = res;
+            if matches!(check_result, CheckResult::Illegal) && !verbose {
+                killed.store(true, Ordering::Relaxed);
                 break; // collect linearizable prefix under verbose mode
             }
         }
     }
-    // TODO support verbose print
     (check_result, LinearizationInfo {})
 }
 
@@ -125,13 +147,14 @@ pub(super) async fn check_operations<M: Model>(
     timeout: Option<Duration>,
 ) -> (CheckResult, LinearizationInfo) {
     let histories = <M as Model>::partition(history);
-    if let Some(dur) = timeout {
-        // XXX I'm not sure
-        match time::timeout(dur, check_parallel::<M>(histories, verbose)).await {
-            Ok(v) => v,
-            Err(_) => (CheckResult::Unknown, LinearizationInfo {}),
-        }
-    } else {
-        check_parallel::<M>(histories, verbose).await
+    let killed = Arc::new(AtomicBool::new(false));
+    if let Some(duration) = timeout {
+        let killed1 = killed.clone();
+        thread::spawn(move || {
+            thread::sleep(duration);
+            killed1.store(true, Ordering::Relaxed);
+        });
     }
+    check_parallel(histories, verbose, killed.clone()).await
 }
+

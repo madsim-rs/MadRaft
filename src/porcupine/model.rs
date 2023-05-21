@@ -36,9 +36,7 @@ pub(crate) struct Entry<M: Model> {
     pub client_id: Option<usize>,
 }
 
-/// Model.
-///
-/// - Eq trait needs to be implemented to represent equality on states.
+/// Model. Eq trait needs to be implemented to represent equality on states.
 pub(crate) trait Model: Eq + Clone + Debug {
     /// Input type
     type In: Clone + Debug;

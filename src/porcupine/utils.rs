@@ -16,7 +16,7 @@ pub(super) struct EntryNode<In, Out> {
 }
 
 impl<In, Out> EntryNode<In, Out> {
-    pub(super) fn leak<'a, 'b>(self: &'a mut Box<Self>) -> &'b mut Self {
+    pub(super) fn ref_mut<'a, 'b>(self: &'a mut Box<Self>) -> &'b mut Self {
         // SAFETY: self will not be dropped
         unsafe { &mut *(self.as_mut() as *mut Self) }
     }
