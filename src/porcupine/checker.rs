@@ -3,22 +3,19 @@
 use crate::porcupine::{
     model::EntryValue,
     utils::{EntryNode, LinkedEntries},
-    CheckResult, Entry, Model, Operation,
+    Entry, Error, Model, Operation, Result,
 };
 use bit_vec::BitVec;
-use futures::{stream::FuturesUnordered, StreamExt};
-use std::{
-    collections::HashMap,
-    mem,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread,
-    time::Duration,
-};
+use std::{collections::HashMap, fmt, mem};
 
+#[derive(Debug)]
 pub(crate) struct LinearizationInfo {}
+
+impl fmt::Display for LinearizationInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("LinearizationInfo")
+    }
+}
 
 fn cache_contains<M: Model>(cache: &HashMap<BitVec, Vec<M>>, bv: &BitVec, m: &M) -> bool {
     if let Some(entries) = cache.get(bv) {
@@ -34,11 +31,7 @@ struct CallEntry<M: Model> {
 }
 
 /// Check single sub-history. Return Some() if it's linearizable.
-fn check_single<M: Model>(
-    history: Vec<Entry<M>>,
-    _verbose: bool,
-    killed: Arc<AtomicBool>,
-) -> CheckResult {
+fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Result<()> {
     let n = history.len() / 2; // number of operations
     debug!("history {:?}", history);
 
@@ -52,9 +45,6 @@ fn check_single<M: Model>(
     let mut state = M::init();
 
     while !undecided.is_empty() {
-        if killed.load(Ordering::Relaxed) {
-            return CheckResult::Unknown;
-        }
         if matches!(entry.value, EntryValue::Call(_)) {
             debug!("id={} call", entry.id);
             // the matched return entry
@@ -94,7 +84,7 @@ fn check_single<M: Model>(
             // time point has to be revoked.
             debug!("id={} return", entry.id);
             if calls.is_empty() {
-                return CheckResult::Illegal;
+                return Err(Error::Illegal(LinearizationInfo {}));
             }
             let CallEntry {
                 mut call,
@@ -110,51 +100,14 @@ fn check_single<M: Model>(
             entry = entry.next_mut().unwrap();
         }
     }
-    CheckResult::Ok
+    Ok(())
 }
 
-/// Check history in parallel.
-///
-/// For each sub-history, spawn a task to test its linearizability.
-async fn check_parallel<M: Model>(
-    histories: Vec<Vec<Entry<M>>>,
-    verbose: bool,
-    killed: Arc<AtomicBool>,
-) -> (CheckResult, LinearizationInfo) {
-    let mut futures: FuturesUnordered<_> = histories
-        .into_iter()
-        .map(|subhistory| {
-            let killed = killed.clone();
-            async move { check_single::<M>(subhistory, verbose, killed) }
-        })
-        .collect();
-    let mut check_result = CheckResult::Ok;
-    while let Some(res) = futures.next().await {
-        if res as u8 > check_result as u8 {
-            check_result = res;
-            if matches!(check_result, CheckResult::Illegal) && !verbose {
-                killed.store(true, Ordering::Relaxed);
-                break; // collect linearizable prefix under verbose mode
-            }
-        }
-    }
-    (check_result, LinearizationInfo {})
-}
-
-pub(super) async fn check_operations<M: Model>(
-    history: Vec<Operation<M>>,
-    verbose: bool,
-    timeout: Option<Duration>,
-) -> (CheckResult, LinearizationInfo) {
+pub(super) fn check_operations<M: Model>(history: Vec<Operation<M>>, verbose: bool) -> Result<()> {
     let histories = <M as Model>::partition(history);
-    let killed = Arc::new(AtomicBool::new(false));
-    if let Some(duration) = timeout {
-        let killed1 = killed.clone();
-        thread::spawn(move || {
-            thread::sleep(duration);
-            killed1.store(true, Ordering::Relaxed);
-        });
+    for history in histories {
+        // TODO get linearized prefix under verbose mode
+        check_single(history, verbose)?;
     }
-    check_parallel(histories, verbose, killed.clone()).await
+    Ok(())
 }
-

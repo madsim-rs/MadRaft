@@ -1,8 +1,7 @@
 use crate::porcupine::{
-    check_operation_verbose, check_operations_timeout,
+    check_operations,
     kv::{KvInput, KvModel, KvOp, KvOutput},
     model::Operation,
-    CheckResult,
 };
 
 use super::tester::*;
@@ -20,8 +19,6 @@ use std::{
         Arc, Mutex,
     },
 };
-
-const LINEARIZABILITY_CHECK_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// test static 2-way sharding, without shard movement.
 #[madsim::test]
@@ -541,14 +538,7 @@ async fn unreliable3_4b() {
     fut.await;
 
     let history = operations.lock().unwrap().clone();
-    let res = check_operations_timeout::<KvModel>(history, LINEARIZABILITY_CHECK_TIMEOUT).await;
-    assert!(
-        !matches!(res, CheckResult::Illegal),
-        "history is not linearizable"
-    );
-    if matches!(res, CheckResult::Unknown) {
-        warn!("linearizability check timed out, assuming history is ok");
-    }
+    check_operations::<KvModel>(history).expect("history is not linearizable");
 
     t.end();
 }

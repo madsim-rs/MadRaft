@@ -132,7 +132,6 @@ async fn basic_agree_2b() {
 /// check, based on counting bytes of RPCs, that each command is sent to each
 /// peer just once.
 #[madsim::test]
-#[ignore]
 async fn rpc_bytes_2b() {
     let servers = 3;
 
@@ -1070,7 +1069,8 @@ async fn snapshot_all_crash_2d() {
 
     for _iter in 0..iters {
         // enough to get a snapshot
-        for _ in 0..=SNAPSHOT_INTERVAL {
+        let nn = SNAPSHOT_INTERVAL / 2 + random.gen_range(0..SNAPSHOT_INTERVAL);
+        for _ in 0..nn {
             t.one(random.gen_entry(), servers, true).await;
         }
         let index1 = t.one(random.gen_entry(), servers, true).await;
@@ -1087,7 +1087,7 @@ async fn snapshot_all_crash_2d() {
 
         let index2 = t.one(random.gen_entry(), servers, true).await;
         assert!(
-            index2 > index1,
+            index2 >= index1 + 1,
             "index decreased from {} to {}",
             index1,
             index2

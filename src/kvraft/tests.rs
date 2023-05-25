@@ -1,6 +1,6 @@
 use crate::{
     kvraft::tester::OpLog,
-    porcupine::{self, kv::KvModel, CheckResult},
+    porcupine::{self, kv::KvModel},
 };
 
 use super::tester::Tester;
@@ -18,8 +18,6 @@ use std::sync::{
 /// The tester generously allows solutions to complete elections in one second
 /// (much more than the paper's range of timeouts).
 const RAFT_ELECTION_TIMEOUT: Duration = Duration::from_millis(1000);
-
-const LINEARIZABILITY_CHECK_TIMEOUT: Duration = Duration::from_millis(1000);
 
 // check that for a specific client all known appends are present in a value,
 // and in order
@@ -242,18 +240,7 @@ async fn generic_test(
         }
     }
 
-    let res = porcupine::check_operations_timeout::<KvModel>(
-        op_log.read(),
-        LINEARIZABILITY_CHECK_TIMEOUT,
-    )
-    .await;
-    assert!(
-        !matches!(res, CheckResult::Illegal),
-        "history is not linearizable"
-    );
-    if matches!(res, CheckResult::Unknown) {
-        warn!("linearizability check timed out, assuming history is ok");
-    }
+    porcupine::check_operations::<KvModel>(op_log.read()).expect("history is not linearizable");
 
     t.end();
 }
