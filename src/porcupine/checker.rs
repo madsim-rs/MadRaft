@@ -41,14 +41,14 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Result<()> 
     let undecided = LinkedEntries::from(history);
 
     // cursor
-    let mut entry = undecided.front_mut().unwrap();
+    let mut entry = undecided.front().unwrap();
     let mut state = M::init();
 
     while !undecided.is_empty() {
         if matches!(entry.value, EntryValue::Call(_)) {
             debug!("id={} call", entry.id);
             // the matched return entry
-            let matched = entry.matched_mut().unwrap();
+            let matched = entry.matched().unwrap();
             let (ok, new_state) = state.step(entry.unwrap_in(), matched.unwrap_out());
             if ok {
                 let mut new_linearized = linearized.clone();
@@ -66,18 +66,18 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Result<()> 
                         ret,
                         state: mem::replace(&mut state, new_state),
                     });
-                    if let Some(front) = undecided.front_mut() {
+                    if let Some(front) = undecided.front() {
                         entry = front;
                     } else {
                         break;
                     }
                 } else {
                     // this state is visited before
-                    entry = entry.next_mut().unwrap();
+                    entry = entry.next().unwrap();
                 }
             } else {
                 // call entry has next
-                entry = entry.next_mut().unwrap();
+                entry = entry.next().unwrap();
             }
         } else {
             // an undecided return found, meaning that a call considered done before this
@@ -87,17 +87,17 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Result<()> 
                 return Err(Error::Illegal(LinearizationInfo {}));
             }
             let CallEntry {
-                mut call,
+                call,
                 ret,
                 state: state0,
             } = calls.pop().unwrap();
             debug!("revoke call {}", call.id);
             state = state0;
             linearized.set(call.id as _, false);
-            entry = call.ref_mut();
+            entry = call.get_ref();
             call.unlift(ret);
             // call entry has next
-            entry = entry.next_mut().unwrap();
+            entry = entry.next().unwrap();
         }
     }
     Ok(())
