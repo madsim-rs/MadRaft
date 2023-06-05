@@ -1,4 +1,5 @@
 use super::raft::*;
+use ::rand::distributions::Alphanumeric;
 use futures::StreamExt;
 use log::*;
 use madsim::{
@@ -162,7 +163,10 @@ impl RaftTester {
         self.storage.n_committed(index)
     }
 
-    pub async fn start(&self, i: usize, cmd: Entry) -> Result<Start> {
+    pub async fn start<C>(&self, i: usize, cmd: C) -> Result<Start>
+    where
+        C: 'static + Send + Sync + Serialize,
+    {
         let raft = self.rafts.lock().unwrap()[i].as_ref().unwrap().clone();
         self.handle
             .local_handle(self.addrs[i])
@@ -358,9 +362,10 @@ impl RaftTester {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Entry {
-    pub x: u64,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Entry {
+    X(u64),
+    Str(String),
 }
 
 #[derive(Clone)]
@@ -405,8 +410,9 @@ impl StorageHandle {
     fn n_committed(&self, index: u64) -> (usize, Option<Entry>) {
         let mut count = 0;
         let mut cmd = None;
-        for log in self.logs.lock().unwrap().iter() {
-            if let Some(&Some(cmd1)) = log.get(index as usize) {
+        let logs = self.logs.lock().unwrap();
+        for log in logs.iter() {
+            if let Some(Some(cmd1)) = &log.get(index as usize) {
                 if let Some(cmd) = cmd {
                     assert_eq!(
                         cmd, cmd1,
@@ -418,11 +424,19 @@ impl StorageHandle {
                 cmd = Some(cmd1);
             }
         }
-        (count, cmd)
+        (count, cmd.cloned())
     }
 
     fn max_index(&self) -> usize {
         let logs = self.logs.lock().unwrap();
         logs.iter().map(|log| log.len() - 1).max().unwrap()
     }
+}
+
+pub fn rand_string(len: usize) -> String {
+    rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(len)
+        .map(char::from)
+        .collect()
 }

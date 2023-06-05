@@ -1,3 +1,9 @@
+use crate::porcupine::{
+    check_operations,
+    kv::{KvInput, KvModel, KvOp, KvOutput},
+    model::Operation,
+};
+
 use super::tester::*;
 use futures::future;
 use log::*;
@@ -10,7 +16,7 @@ use std::{
     future::Future,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -215,6 +221,77 @@ impl Tester {
         async move {
             done.store(true, Ordering::SeqCst);
             future::join_all(handles).await
+        }
+    }
+
+    fn spawn_concurrent_ops_with_log(
+        &self,
+        n: usize,
+        begin: Instant,
+        kvs: Arc<Vec<(String, String)>>,
+        value_len: usize,
+        log: &Arc<Mutex<Vec<Operation<KvModel>>>>,
+    ) -> impl Future<Output = ()> {
+        let done = Arc::new(AtomicBool::new(false));
+        let mut handles = vec![];
+        for _ in 0..n {
+            let ck = self.make_client();
+            let done = done.clone();
+            let kvs = kvs.clone();
+            let log = log.clone();
+            let t0 = begin.clone();
+            handles.push(task::spawn_local(async move {
+                let mut rng = rand::rng();
+                while !done.load(Ordering::SeqCst) {
+                    let ki = rng.gen_range(0..n);
+                    let nv = rand_string(value_len);
+                    let start = t0.elapsed().as_micros();
+                    let (input, output) = if rng.gen_bool(0.5) {
+                        ck.append(kvs[ki].0.clone(), nv.clone()).await;
+                        let input = KvInput {
+                            op: KvOp::Append,
+                            key: kvs[ki].0.clone(),
+                            value: nv,
+                        };
+                        let output = KvOutput {
+                            value: "".to_string(),
+                        };
+                        (input, output)
+                    } else if rng.gen_bool(0.1) {
+                        ck.put(kvs[ki].0.clone(), nv.clone()).await;
+                        let input = KvInput {
+                            op: KvOp::Put,
+                            key: kvs[ki].0.clone(),
+                            value: nv,
+                        };
+                        let output = KvOutput {
+                            value: "".to_string(),
+                        };
+                        (input, output)
+                    } else {
+                        let v = ck.get(kvs[ki].0.clone()).await;
+                        let input = KvInput {
+                            op: KvOp::Get,
+                            key: kvs[ki].0.clone(),
+                            value: "".to_string(),
+                        };
+                        let output = KvOutput { value: v };
+                        (input, output)
+                    };
+                    let end = t0.elapsed().as_micros();
+                    log.lock().unwrap().push(Operation {
+                        client_id: None,
+                        input,
+                        call: start,
+                        output,
+                        ret: end,
+                    });
+                }
+            }));
+        }
+        async move {
+            done.store(true, Ordering::SeqCst);
+            future::join_all(handles).await;
         }
     }
 }
@@ -426,10 +503,44 @@ async fn unreliable2_4b() {
     t.end();
 }
 
-#[ignore]
 #[madsim::test]
 async fn unreliable3_4b() {
-    // TODO: linearizable
+    info!("Test: unreliable 3...\n");
+
+    let t = Tester::new(3, true, Some(100)).await;
+    let begin = Instant::now();
+    let operations = Arc::new(Mutex::new(Vec::<Operation<KvModel>>::new()));
+
+    let ck = t.make_client();
+    t.join(0).await;
+
+    let n = 10;
+    let kvs = (0..n)
+        .map(|i| (i.to_string(), rand_string(5)))
+        .collect::<Vec<_>>();
+    ck.put_kvs_with_log(begin, &kvs, &operations).await;
+
+    let fut = t.spawn_concurrent_ops_with_log(n, begin, Arc::new(kvs), 5, &operations);
+
+    time::sleep(Duration::from_millis(150)).await;
+    t.join(1).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.join(2).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.leave(0).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.leave(1).await;
+    time::sleep(Duration::from_millis(500)).await;
+    t.join(1).await;
+    t.join(0).await;
+
+    time::sleep(Duration::from_secs(2)).await;
+    fut.await;
+
+    let history = operations.lock().unwrap().clone();
+    check_operations::<KvModel>(history).expect("history is not linearizable");
+
+    t.end();
 }
 
 /// optional test to see whether servers are deleting
