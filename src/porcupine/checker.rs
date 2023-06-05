@@ -2,7 +2,7 @@
 
 use crate::porcupine::{
     model::EntryValue,
-    utils::{EntryNode, LinkedEntries},
+    utils::{EntryNode, EntryView, LinkedEntries},
     Entry, Error, Model, Operation, Result,
 };
 use bit_vec::BitVec;
@@ -25,8 +25,7 @@ fn cache_contains<M: Model>(cache: &HashMap<BitVec, Vec<M>>, bv: &BitVec, m: &M)
 }
 
 struct CallEntry<M: Model> {
-    call: Box<EntryNode<M::In, M::Out>>,
-    ret: Box<EntryNode<M::In, M::Out>>,
+    call: EntryView<M::In, M::Out>,
     state: M,
 }
 
@@ -45,25 +44,25 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Result<()> 
     let mut state = M::init();
 
     while !undecided.is_empty() {
-        if matches!(entry.value, EntryValue::Call(_)) {
-            debug!("id={} call", entry.id);
+        if matches!(*entry.borrow().value, EntryValue::Call(_)) {
+            debug!("id={} call", entry.borrow().id);
             // the matched return entry
-            let matched = entry.matched().unwrap();
-            let (ok, new_state) = state.step(entry.unwrap_in(), matched.unwrap_out());
+            let matched = entry.borrow().matched().unwrap();
+            let (ok, new_state) =
+                state.step(entry.borrow().unwrap_in(), matched.borrow().unwrap_out());
             if ok {
                 let mut new_linearized = linearized.clone();
-                new_linearized.set(entry.id, true);
+                new_linearized.set(entry.borrow().id, true);
                 if !cache_contains(&cache, &new_linearized, &new_state) {
-                    debug!("cache miss, push {} into calls", entry.id);
-                    linearized.set(entry.id, true);
+                    debug!("cache miss, push {} into calls", entry.borrow().id);
+                    linearized.set(entry.borrow().id, true);
                     cache
                         .entry(new_linearized)
                         .or_default()
                         .push(new_state.clone());
-                    let (call, ret) = entry.lift();
+                    let call = entry.borrow().lift();
                     calls.push(CallEntry {
                         call,
-                        ret,
                         state: mem::replace(&mut state, new_state),
                     });
                     if let Some(front) = undecided.front() {
@@ -73,31 +72,30 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Result<()> 
                     }
                 } else {
                     // this state is visited before
-                    entry = entry.next().unwrap();
+                    entry = EntryNode::next(entry).unwrap();
                 }
             } else {
                 // call entry has next
-                entry = entry.next().unwrap();
+                entry = EntryNode::next(entry).unwrap();
             }
         } else {
             // an undecided return found, meaning that a call considered done before this
             // time point has to be revoked.
-            debug!("id={} return", entry.id);
+            debug!("id={} return", entry.borrow().id);
             if calls.is_empty() {
                 return Err(Error::Illegal(LinearizationInfo {}));
             }
             let CallEntry {
                 call,
-                ret,
                 state: state0,
             } = calls.pop().unwrap();
             debug!("revoke call {}", call.id);
             state = state0;
             linearized.set(call.id as _, false);
-            entry = call.get_ref();
-            call.unlift(ret);
+            // entry = call.get_ref();
+            entry = call.unlift();
             // call entry has next
-            entry = entry.next().unwrap();
+            entry = EntryNode::next(entry).unwrap();
         }
     }
     Ok(())
@@ -106,7 +104,6 @@ fn check_single<M: Model>(history: Vec<Entry<M>>, _verbose: bool) -> Result<()> 
 pub(super) fn check_operations<M: Model>(history: Vec<Operation<M>>, verbose: bool) -> Result<()> {
     let histories = <M as Model>::partition(history);
     for history in histories {
-        // TODO get linearized prefix under verbose mode
         check_single(history, verbose)?;
     }
     Ok(())
