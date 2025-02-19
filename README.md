@@ -22,6 +22,14 @@ Complete the code and pass all tests!
 cargo test
 ```
 
+## Note
+
+If you use MadSim v0.1.*, make sure your rustc version < 1.72.0 by running the following commands:
+```sh
+rustup install 1.70.0
+rustup default 1.70.0
+```
+
 ## Tips
 
 To run a part of the tests or a specific test:
